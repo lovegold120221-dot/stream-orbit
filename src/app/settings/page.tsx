@@ -140,21 +140,23 @@ export default function SettingsPage() {
       </header>
 
       <div className="settings-layout">
-        {/* Sidebar nav */}
-        <nav className="settings-nav" aria-label="Settings categories">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              className={`settings-nav-item${activeTab === tab.id ? " settings-nav-item--active" : ""}`}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-
         {/* Content */}
         <section className="settings-content">
+          {/* Horizontal tab bar */}
+          <div className="settings-tabs-bar" role="tablist" aria-label="Settings categories">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                role="tab"
+                aria-selected={activeTab === tab.id}
+                className={`settings-tab-btn${activeTab === tab.id ? " settings-tab-btn--active" : ""}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
           <form onSubmit={handleSave}>
             {activeTab === "general" && (
               <div className="settings-tab">
