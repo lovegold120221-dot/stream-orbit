@@ -59,6 +59,11 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "electron"
+    ],
+    "ignoredBuiltDependencies": [
+      "electron-winstaller",
+      "sharp",
+      "unrs-resolver"
     ]
   }
 }
