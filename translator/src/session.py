@@ -483,108 +483,112 @@ class GeminiSession:
         audio_frames = 0
         text_chunks = 0
         _first_content_seen = False
-        async for raw in ws:
-            if self._closed.is_set():
-                return
-            try:
-                msg = json.loads(raw)
-            except json.JSONDecodeError:
-                logger.debug("ignoring non-JSON WS frame")
-                continue
-
-            if msg.get("setupComplete") is not None:
-                logger.info(
-                    "Eburon setup complete: %s -> %s",
-                    self._speaker_identity,
-                    self._target_lang,
-                )
-                self._consecutive_failures = 0
-                setup_complete.set()
-                continue
-
-            sc = msg.get("serverContent")
-            if not sc:
-                # Log unrecognized message types once per session for debugging
-                if not _first_content_seen:
-                    logger.debug(
-                        "Eburon non-serverContent msg (%s -> %s): keys=%s",
-                        self._speaker_identity,
-                        self._target_lang,
-                        list(msg.keys())[:5],
-                    )
-                continue
-
-            if not _first_content_seen:
-                _first_content_seen = True
-                logger.info(
-                    "Eburon first serverContent (%s -> %s): keys=%s",
-                    self._speaker_identity,
-                    self._target_lang,
-                    list(sc.keys()),
-                )
-
-            # Translated audio frames.
-            model_turn = sc.get("modelTurn")
-            if model_turn is not None:
-                for part in model_turn.get("parts", []) or []:
-                    inline = part.get("inlineData")
-                    if inline and inline.get("data"):
-                        pcm = base64.b64decode(inline["data"])
-                        await push_pcm_to_source(self._audio_source, pcm)
-                        audio_frames += 1
-                        if audio_frames in (1, 10, 100) or audio_frames % 500 == 0:
-                            logger.info(
-                                "eburon -> %s frames=%d (%s -> %s)",
-                                self._target_lang,
-                                audio_frames,
-                                self._speaker_identity,
-                                self._target_lang,
-                            )
-
-            # --- OUTPUT TRANSCRIPTION (translated text) ---
-            ot = sc.get("outputTranscription")
-            if not ot and model_turn is not None:
-                ot = model_turn.get("outputTranscription")
-            if ot and ot.get("text"):
-                ot_text = ot["text"]
-                # Parse structured [OUTPUT]...[/OUTPUT] segments
-                output_segments = self._parse_output_segments(ot_text)
-                for seg in output_segments:
-                    self._append_history("target", seg)
-                    self._pending_segments.append(seg)
-                # Publish the plain text version for backward-compatible captions
-                await self._publish_transcript(ot_text, final=False)
-                # For cinematic faithful mode, parse cast blocks
-                if self._content_type == CONTENT_TYPE_CINEMATIC_FAITHFUL:
-                    self._parse_cinematic_output(ot_text)
-
-            # --- SOURCE TRANSCRIPTION (what the speaker said) ---
-            it = sc.get("inputTranscription")
-            if it and it.get("text"):
-                it_text = it["text"]
-                # Parse structured [SEGMENT]...[/SEGMENT] segments
-                source_segments = self._parse_source_segments(it_text)
-                for seg in source_segments:
-                    self._append_history("source", seg)
-                    self._pending_segments.append(seg)
-                # Publish the plain text version for backward-compatible captions
-                await self._publish_source_transcript(it_text, final=False)
-                text_chunks += 1
-                if text_chunks in (1, 10) or text_chunks % 50 == 0:
+        try:
+            async for raw in ws:
+                if self._closed.is_set():
+                    return
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    logger.debug("ignoring non-JSON WS frame")
+                    continue
+                
+                if msg.get("setupComplete") is not None:
                     logger.info(
-                        "eburon transcript chunk #%d for %s -> %s",
-                        text_chunks,
+                        "Eburon setup complete: %s -> %s",
                         self._speaker_identity,
                         self._target_lang,
                     )
+                    self._consecutive_failures = 0
+                    setup_complete.set()
+                    continue
+                
+                sc = msg.get("serverContent")
+                if not sc:
+                    # Log unrecognized message types once per session for debugging
+                    if not _first_content_seen:
+                        logger.debug(
+                            "Eburon non-serverContent msg (%s -> %s): keys=%s",
+                            self._speaker_identity,
+                            self._target_lang,
+                            list(msg.keys())[:5],
+                        )
+                    continue
+                
+                if not _first_content_seen:
+                    _first_content_seen = True
+                    logger.info(
+                        "Eburon first serverContent (%s -> %s): keys=%s",
+                        self._speaker_identity,
+                        self._target_lang,
+                        list(sc.keys()),
+                    )
+                
+                # Translated audio frames.
+                model_turn = sc.get("modelTurn")
+                if model_turn is not None:
+                    for part in model_turn.get("parts", []) or []:
+                        inline = part.get("inlineData")
+                        if inline and inline.get("data"):
+                            pcm = base64.b64decode(inline["data"])
+                            await push_pcm_to_source(self._audio_source, pcm)
+                            audio_frames += 1
+                            if audio_frames in (1, 10, 100) or audio_frames % 500 == 0:
+                                logger.info(
+                                    "eburon -> %s frames=%d (%s -> %s)",
+                                    self._target_lang,
+                                    audio_frames,
+                                    self._speaker_identity,
+                                    self._target_lang,
+                                )
+                
+                # --- OUTPUT TRANSCRIPTION (translated text) ---
+                ot = sc.get("outputTranscription")
+                if not ot and model_turn is not None:
+                    ot = model_turn.get("outputTranscription")
+                if ot and ot.get("text"):
+                    ot_text = ot["text"]
+                    # Parse structured [OUTPUT]...[/OUTPUT] segments
+                    output_segments = self._parse_output_segments(ot_text)
+                    for seg in output_segments:
+                        self._append_history("target", seg)
+                        self._pending_segments.append(seg)
+                    # Publish the plain text version for backward-compatible captions
+                    await self._publish_transcript(ot_text, final=False)
+                    # For cinematic faithful mode, parse cast blocks
+                    if self._content_type == CONTENT_TYPE_CINEMATIC_FAITHFUL:
+                        self._parse_cinematic_output(ot_text)
+                
+                # --- SOURCE TRANSCRIPTION (what the speaker said) ---
+                it = sc.get("inputTranscription")
+                if it and it.get("text"):
+                    it_text = it["text"]
+                    # Parse structured [SEGMENT]...[/SEGMENT] segments
+                    source_segments = self._parse_source_segments(it_text)
+                    for seg in source_segments:
+                        self._append_history("source", seg)
+                        self._pending_segments.append(seg)
+                    # Publish the plain text version for backward-compatible captions
+                    await self._publish_source_transcript(it_text, final=False)
+                    text_chunks += 1
+                    if text_chunks in (1, 10) or text_chunks % 50 == 0:
+                        logger.info(
+                            "eburon transcript chunk #%d for %s -> %s",
+                            text_chunks,
+                            self._speaker_identity,
+                            self._target_lang,
+                        )
+                
+                if sc.get("turnComplete"):
+                    await self._publish_transcript("", final=True)
+                    # Publish accumulated structured segments as JSON
+                    await self._publish_structured_json()
+                    # For cinematic faithful mode, publish the structured segment summary
+                    if self._content_type == CONTENT_TYPE_CINEMATIC_FAITHFUL:
+                        await self._publish_cinematic_json()
+        finally:
+            logger.info("TOMBSTONE: _pump_output terminated for %s -> %s", self._speaker_identity, self._target_lang)
 
-            if sc.get("turnComplete"):
-                await self._publish_transcript("", final=True)
-                # Publish accumulated structured segments as JSON
-                await self._publish_structured_json()
-                # For cinematic faithful mode, publish the structured segment summary
-                if self._content_type == CONTENT_TYPE_CINEMATIC_FAITHFUL:
-                    await self._publish_cinematic_json()
 
     def _append_history(self, kind: str, segment: dict) -> None:
         """Add a structured segment to rolling memory, capping at limits."""
