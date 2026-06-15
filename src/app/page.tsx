@@ -34,7 +34,9 @@ export default function Home() {
   const [joinValue, setJoinValue] = useState("");
   const [joinError, setJoinError] = useState("");
   const [scheduleTitle, setScheduleTitle] = useState("Orbit Meeting");
-  const [scheduleTime, setScheduleTime] = useState("");
+  const [scheduleDate, setScheduleDate] = useState(new Date().toISOString().split("T")[0]);
+  const [scheduleHour, setScheduleHour] = useState("12");
+  const [scheduleMinute, setScheduleMinute] = useState("00");
   const [scheduledLink, setScheduledLink] = useState("");
   const [copied, setCopied] = useState(false);
   const [reminderToast, setReminderToast] = useState(false);
@@ -121,9 +123,15 @@ export default function Home() {
   async function showSchedulePanel() {
     setActivePanel("schedule");
     setCopied(false);
-    if (!scheduleTime) {
-      setScheduleTime(getDefaultScheduleTime());
-    }
+    
+    // Default to 30 mins from now
+    const now = new Date();
+    const future = new Date(now.getTime() + 30 * 60_000);
+    
+    setScheduleDate(future.toISOString().split("T")[0]);
+    setScheduleHour(future.getHours().toString().padStart(2, "0"));
+    setScheduleMinute(future.getMinutes().toString().padStart(2, "0"));
+    
     if (!scheduledLink) {
       setScheduledLink(`${window.location.origin}/session/${crypto.randomUUID()}`);
     }
