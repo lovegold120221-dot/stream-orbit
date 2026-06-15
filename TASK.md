@@ -2175,3 +2175,34 @@ Agent starts, connects to LiveKit Cloud (`wss://eburon-meet-15gd8gwg.livekit.clo
 - Validation performed:
   - Cleaned local cache directories.
 
+---
+
+## TASK-20260615-171500: Center Share Screen Dialog Modal
+
+### START RECORD
+- STATUS: COMPLETED
+- Start time: 2026-06-15T17:13:00Z
+- User request: Fix the share screen popup modal positioning so that it is centered in the viewport
+- Success criteria:
+  - Correct the positioning of the screen share dialog from the bottom bar to the center of the viewport on all screens.
+  - Avoid layout restrictions from parent `backdrop-filter` or `transform` stacking contexts.
+  - Successfully compile and pass validation tests.
+
+### WHAT WAS DONE
+- **Wrapped Screen Share Dialog in React Portal**:
+  - Imported `createPortal` from `react-dom` and created a `mounted` state inside `ControlBar.tsx` for client-only mounting safety (avoiding SSR hydration mismatches).
+  - Wrapped the `.share-dialog-overlay` in `createPortal(..., document.body)`. This renders the modal directly at the document body level, completely escaping the containing block constraints created by the parent `.control-bar`'s `backdrop-filter` rules.
+- **Verified Build**:
+  - Ran `npx next build` which compiled successfully (all 17 routes generated).
+  - Ran Python unit tests using `pytest` inside the `translator` directory to verify worker integrity.
+
+### FINAL REPORT
+- STATUS: COMPLETED
+- End time: 2026-06-15T17:18:00Z
+- Files changed:
+  - `src/app/session/[id]/room/ControlBar.tsx`
+- Validation performed:
+  - Verified compilation via `npx next build`.
+  - Verified Python tests via `pytest`.
+
+

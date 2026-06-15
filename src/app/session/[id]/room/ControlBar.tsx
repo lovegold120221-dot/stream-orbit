@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   useLocalParticipant,
@@ -130,6 +131,11 @@ export default function ControlBar({
   const shareConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const REACTIONS = ["✋", "👍", "👏", "😂", "❤️", "🎉", "🙌", "💯"];
 
@@ -572,7 +578,7 @@ export default function ControlBar({
       )}
 
       {/* ——— Share Screen Dialog ——— */}
-      {showShareDialog && (
+      {showShareDialog && mounted && createPortal(
         <div
           className="share-dialog-overlay"
           onClick={() => {
@@ -657,7 +663,8 @@ export default function ControlBar({
               </button>
             </div>
           </section>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
