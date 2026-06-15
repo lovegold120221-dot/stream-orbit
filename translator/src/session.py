@@ -22,6 +22,7 @@ from livekit import rtc
 
 from audio import iter_pcm_for_gemini, make_audio_source, push_pcm_to_source
 from config import (
+    AVAILABLE_VOICES,
     GEMINI_INPUT_SAMPLE_RATE,
     GEMINI_MAX_FAILURES_BEFORE_LONG_BACKOFF,
     GEMINI_MODEL,
@@ -63,6 +64,19 @@ class GeminiSession:
         """
         return code.split("-")[0]
 
+    def _voice_pool_text(self) -> str:
+        """Format the available voice pool for injection into the system instruction."""
+        lines: list[str] = []
+        for i, (name, desc) in enumerate(self._available_voices):
+            label = f"Voice {i + 1} (\u201c{name}\u201d)"
+            lines.append(f"  {label}: {desc}")
+        lines.append(
+            "  Assign these in order of speaker appearance (Voice 1 to "
+            "first detected speaker, Voice 2 to second, etc.). If there "
+            "are more speakers than voices, wrap around from the start."
+        )
+        return "\n".join(lines)
+
     def __init__(
         self,
         *,
@@ -74,6 +88,7 @@ class GeminiSession:
         gemini_api_key: str,
         glossary: list[dict[str, str]] | None = None,
         content_type: str = "normal",
+        available_voices: list[tuple[str, str]] | None = None,
     ) -> None:
         self._room = room
         self._speaker_identity = speaker_identity
@@ -83,9 +98,14 @@ class GeminiSession:
         self._gemini_api_key = gemini_api_key
         self._glossary = glossary or []
         self._content_type = content_type
+        self._available_voices = available_voices or AVAILABLE_VOICES[:4]
 
         participant = self._room.remote_participants.get(self._speaker_identity)
-        source_lang = (participant.attributes or {}).get(PARTICIPANT_LANG_ATTR) if participant else None
+        source_lang = (
+            (participant.attributes or {}).get(PARTICIPANT_LANG_ATTR)
+            if participant
+            else None
+        )
         self._source_lang = None if source_lang == NATIVE_LANG else source_lang
 
         self._audio_source = make_audio_source()
@@ -315,7 +335,27 @@ class GeminiSession:
             "4. Even in a conversation or meeting, treat each participant "
             "as a distinct \u201ccharacter\u201d with their own consistent "
             "vocal signature \u2014 the listener must be able to tell who "
-            "is \u201cspeaking\u201d from your audio delivery alone."
+            "is \u201cspeaking\u201d from your audio delivery alone.\n"
+            "5. SPEAKER TAGS IN SOURCE TRANSCRIPTION \u2014 CRITICAL: "
+            "For EVERY source transcription chunk you output, you MUST "
+            "prepend a speaker tag so the frontend knows which speaker "
+            "said what. Use short, consistent labels:\n"
+            "   \u2022 FIRST detected speaker: no tag needed (single-speaker "
+            "transcription as-is)\n"
+            "   \u2022 SECOND+ speakers: prepend \u201c[A] \u201d, "
+            "\u201c[B] \u201d, \u201c[C] \u201d, etc. in order of first "
+            "appearance\n"
+            "   \u2022 If a speaker is identifiable by name from context "
+            "(e.g. \u201cJohn said\u2026\u201d), use their name tag: "
+            "\u201c[John] \u201d\n"
+            "   \u2022 When the same speaker resumes after another has spoken, "
+            "re-use their existing letter tag \u2014 NEVER assign a new letter\n"
+            "   \u2022 When speaker switches mid-chunk, split and tag: "
+            "\u201c[A] First line [B] Second line\u201d\n"
+            "6. NEVER merge two speakers\u2019 transcribed words into a single "
+            "unbroken transcription line. If two people speak at once, still "
+            "tag the dominant speaker\u2019s line and note [crosstalk] if "
+            "detectable."
             "\n\n"
             "CHARACTER ROLE MIMICRY \u2014 DISTINCT VOCAL STYLES:\n"
             "1. For EACH speaker, adopt a distinct vocal delivery that matches "
@@ -354,7 +394,37 @@ class GeminiSession:
             "trajectory of the original. Your output should feel like "
             "watching/listening to the content natively in the target language "
             "\u2014 NOT like listening to a flat interpreter reading a script."
-            f"\n\n"
+            "\n\n"
+            "SPEAKER-VOICE MAPPING \u2014 PER-SPEAKER VOICE ASSIGNMENT:\n"
+            "1. When your output contains multiple speakers (detected via "
+            "diarization above), you MUST assign each speaker a distinct "
+            "voice from the AVAILABLE VOICE POOL below.\n"
+            "2. Assign voices in order of speaker appearance: first detected "
+            "speaker gets the first voice in the pool, second gets the second, "
+            "third gets the third, and so on. The pool wraps around if there "
+            "are more speakers than voices.\n"
+            "3. Once a speaker has been assigned a voice, that assignment is "
+            "PERMANENT for the entire session. Speaker A ALWAYS uses the "
+            "first voice, Speaker B ALWAYS uses the second voice, etc. "
+            "Never swap voices mid-session.\n"
+            "4. The voice assignment governs BOTH the vocal delivery in the "
+            "translated audio AND the speaker tag in the source transcription. "
+            "Speaker A (tag \u201c[A]\u201d) must sound like the first voice "
+            "in the pool; Speaker B must sound like the second; and so on.\n"
+            "5. The voice characteristics must be clearly distinguishable "
+            "from one another. The listener must be able to identify which "
+            "speaker is talking from the audio alone, even without speaker "
+            "tags.\n"
+            "6. Within a single speaker\u2019s assigned voice, you may still "
+            "modulate pitch, speed, and emotion for dramatic effect \u2014 "
+            "but the core vocal signature (tone colour, resonance, baseline "
+            "pitch range) must remain consistent for that speaker.\n"
+            "7. OUTPUT TRANSCRIPTION SPEAKER TAGS: In the output transcription "
+            "(the translated text stream), you MUST also include speaker tags "
+            "matching the same assignment. The translated text captions must "
+            "show \u201c[A] translated text\u201d, \u201c[B] translated text\u201d "
+            "so the listener sees who is speaking in their own language.\n\n"
+            "AVAILABLE VOICE POOL:\n" + self._voice_pool_text() + "\n"
             f"You MUST translate the input into the language with code "
             f"'{self._target_lang}'. All output audio and text must be in "
             f"that language."
@@ -473,7 +543,6 @@ class GeminiSession:
                 "that sounds indistinguishable from a professionally dubbed film "
                 "in the target language. The base rules still apply; the following "
                 "are the professional dubbing studio standards you MUST follow:\n\n"
-
                 "1. VOICE CASTING & CHARACTER SIGNATURE:\n"
                 "  \u2022 Every character must have a distinct, recognisable vocal "
                 "signature that persists for the entire film. The audience should "
@@ -491,7 +560,6 @@ class GeminiSession:
                 "  \u2022 Never let characters \u201csound like the same person\u201d "
                 "\u2014 vocal variety between characters is essential for "
                 "audience comprehension during rapid dialogue.\n\n"
-
                 "2. DUBBING PERFORMANCE QUALITY:\n"
                 "  \u2022 Deliver each line with the full emotional commitment "
                 "of a professional voice actor. Lines must never sound flat, "
@@ -512,7 +580,6 @@ class GeminiSession:
                 "  \u2022 Silence is part of the performance. If a character "
                 "pauses before answering, that pause carries weight. Replicate "
                 "its exact duration.\n\n"
-
                 "3. DIALOGUE ADAPTATION (NOT LITERAL TRANSLATION):\n"
                 "  \u2022 This is dubbing, not subtitling. Your job is to write "
                 "dialogue that sounds like it was originally written in the "
@@ -530,7 +597,6 @@ class GeminiSession:
                 "offensiveness in the target language \u2014 not sanitised.\n"
                 "  \u2022 When a character uses a catchphrase or recurring "
                 "verbal tic, translate it consistently every single time.\n\n"
-
                 "4. LIP-SYNC & PHONETIC AWARENESS:\n"
                 "  \u2022 Prioritise translations whose syllable count, stress "
                 "pattern, and phrasing duration roughly match the original line. "
@@ -546,7 +612,6 @@ class GeminiSession:
                 "emotional truth and naturalness over rigid lip-sync. A slightly "
                 "off-sync but emotionally perfect take is better than a "
                 "mechanical on-sync take.\n\n"
-
                 "5. GENRE-MASTERY \u2014 PACE, RHYTHM & REGISTER:\n"
                 "  \u2022 Action: Breathless, urgent pacing. Short, clipped "
                 "sentences. Sharp, staccato delivery. Every syllable punches. "
@@ -569,7 +634,6 @@ class GeminiSession:
                 "Bigger emotional swings. Clear, bright enunciation. Higher "
                 "energy baseline, with bigger contrasts between quiet and "
                 "loud moments.\n\n"
-
                 "6. SCENE FLOW & CONTINUITY:\n"
                 "  \u2022 A scene is a dramatic unit with a beginning, middle, "
                 "and end. Your delivery must arc with the scene \u2014 start "
@@ -587,7 +651,6 @@ class GeminiSession:
                 "(echoey hall, intimate room, outdoor wind) should feel "
                 "consistent within a scene. Don\u2019t jump between vocal "
                 "proximities without the scene changing.\n\n"
-
                 "7. FORBIDDEN IN PROFESSIONAL DUBBING:\n"
                 "  \u2022 NEVER sound like a translator or interpreter reading "
                 "a script. No flat, educational, or documentary-presenter tone.\n"
@@ -609,9 +672,7 @@ class GeminiSession:
         return {
             "setup": {
                 "model": f"models/{GEMINI_MODEL}",
-                "systemInstruction": {
-                    "parts": [{"text": system_instruction_text}]
-                },
+                "systemInstruction": {"parts": [{"text": system_instruction_text}]},
                 "outputAudioTranscription": {},
                 "inputAudioTranscription": {},
                 "generationConfig": {

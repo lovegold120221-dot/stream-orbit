@@ -10,6 +10,7 @@ import aiohttp
 from livekit import rtc
 
 from config import (
+    AVAILABLE_VOICES,
     GLOSSARY_ATTR,
     NATIVE_LANG,
     PARTICIPANT_LANG_ATTR,
@@ -208,9 +209,13 @@ class TranslationRouter:
                             if isinstance(parsed, list):
                                 glossary = parsed
                         except (json.JSONDecodeError, TypeError):
-                            logger.debug("invalid glossary attr for %s", speaker_identity)
+                            logger.debug(
+                                "invalid glossary attr for %s", speaker_identity
+                            )
 
-                    content_type = (participant.attributes or {}).get("orbit_content_type", "normal")
+                    content_type = (participant.attributes or {}).get(
+                        "orbit_content_type", "normal"
+                    )
 
                 session = GeminiSession(
                     room=self._room,
@@ -221,6 +226,7 @@ class TranslationRouter:
                     gemini_api_key=self._gemini_api_key,
                     glossary=glossary,
                     content_type=content_type,
+                    available_voices=AVAILABLE_VOICES,
                 )
                 self._sessions[key] = session
                 try:
@@ -350,23 +356,24 @@ class TranslationRouter:
                 logger.warning("Invalid retranslation request: %s", payload)
                 return
 
-            adjusted_text = await self._retranslate_text(source_text, target_lang, adjustment)
+            adjusted_text = await self._retranslate_text(
+                source_text, target_lang, adjustment
+            )
 
             if adjusted_text:
-                response = {
-                    "key": key,
-                    "text": adjusted_text
-                }
+                response = {"key": key, "text": adjusted_text}
                 await self._room.local_participant.publish_data(
                     payload=json.dumps(response).encode("utf-8"),
                     topic="retranslation_response",
-                    reliable=True
+                    reliable=True,
                 )
                 logger.info("Retranslation successful for key=%s", key)
         except Exception as exc:
             logger.exception("Error handling retranslation: %s", exc)
 
-    async def _retranslate_text(self, text: str, target_lang: str, adjustment: str) -> str:
+    async def _retranslate_text(
+        self, text: str, target_lang: str, adjustment: str
+    ) -> str:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self._gemini_api_key}"
 
         prompt = (
@@ -377,21 +384,23 @@ class TranslationRouter:
             f"Original text: {text}"
         )
 
-        payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }]
-        }
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload) as resp:
                     if resp.status == 200:
                         result = await resp.json()
-                        return result["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        return result["candidates"][0]["content"]["parts"][0][
+                            "text"
+                        ].strip()
                     else:
                         body = await resp.text()
-                        logger.error("Gemini API error during retranslation status=%d body=%s", resp.status, body)
+                        logger.error(
+                            "Gemini API error during retranslation status=%d body=%s",
+                            resp.status,
+                            body,
+                        )
                         return ""
         except Exception as e:
             logger.error("Failed to call Gemini API for retranslation: %s", e)

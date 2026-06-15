@@ -46,6 +46,48 @@ RECONCILE_DEBOUNCE_SEC = 0.25
 # (speaker mutes, or the last listener for a target language leaves).
 SESSION_GRACE_SEC = 10.0
 
+# --- Voice pool for multi-speaker translation ---
+
+# When multiple speakers are detected in the input audio, the translator
+# assigns each speaker a distinct voice from this pool. Each entry is a
+# (voice_name, description) tuple describing the vocal character.
+# The first voice is the default for the first detected speaker.
+AVAILABLE_VOICES: list[tuple[str, str]] = [
+    # Group 1
+    ("Zephyr", "Bright — high energy, clear articulation, female"),
+    ("Kore", "Firm — assertive, confident delivery, female"),
+    ("Orus", "Firm — strong, authoritative tone, male"),
+    ("Autonoe", "Bright — clear, vibrant expression, female"),
+    ("Umbriel", "Easy-going — relaxed, conversational, male"),
+    ("Erinome", "Clear — crisp, distinct articulation, female"),
+    ("Laomedeia", "Upbeat — positive, energetic style, female"),
+    ("Schedar", "Even — balanced, consistent tone, male"),
+    ("Achird", "Friendly — warm, approachable tone, male"),
+    ("Sadachbia", "Lively — spirited, animated delivery, female"),
+    # Group 2
+    ("Puck", "Upbeat — cheerful, enthusiastic tone, male"),
+    ("Fenrir", "Excitable — energetic, animated expression, male"),
+    ("Aoede", "Breezy — casual, relaxed delivery, female"),
+    ("Enceladus", "Breathy — soft, airy quality, male"),
+    ("Algieba", "Smooth — polished, fluid delivery, male"),
+    ("Algenib", "Gravelly — rough, textured quality, male"),
+    ("Achernar", "Soft — gentle, mellow tone, female"),
+    ("Gacrux", "Mature — experienced, seasoned quality, female"),
+    ("Zubenelgenubi", "Casual — informal, conversational, male"),
+    ("Sadaltager", "Knowledgeable — informed, instructive, male"),
+    # Group 3
+    ("Charon", "Informative — educational, explanatory style, male"),
+    ("Leda", "Youthful — young-sounding, fresh voice, female"),
+    ("Callirrhoe", "Easy-going — laid-back, comfortable style, female"),
+    ("Iapetus", "Clear — precise, well-articulated, male"),
+    ("Despina", "Smooth — refined, elegant tone, female"),
+    ("Rasalgethi", "Informative — educational, instructive, male"),
+    ("Alnilam", "Firm — steady, resolute delivery, male"),
+    ("Pulcherrima", "Forward — direct, straightforward style, female"),
+    ("Vindemiatrix", "Gentle — soft, kind delivery, female"),
+    ("Sulafat", "Warm — rich, comforting tone, female"),
+]
+
 # --- Gemini connection ---
 
 # Exponential backoff schedule for reconnecting a failed Gemini session.
