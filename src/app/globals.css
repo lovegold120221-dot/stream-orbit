@@ -3357,26 +3357,25 @@ html[data-theme="dark"] .auth-logo-bg {
 }
 
 .schedule-time-picker input[type="date"]:hover {
-  border-color: var(--accent);
+  border-color: #aeb9cb;
   transform: translateY(-1px);
-  box-shadow: var(--shadow);
 }
 
 .schedule-time-picker input[type="date"]:focus {
   outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 4px var(--accent-soft);
+  border-color: #2f6fed;
+  box-shadow: 0 0 0 4px rgba(47, 111, 237, 0.1);
 }
 
 .time-selects {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: var(--bg-inset);
+  background: #f8fafc;
   padding: 6px;
   border-radius: 16px;
-  border: 1px solid var(--border-light);
-  box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+  border: 1px solid #e1e5ef;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
 }
 
 .time-selects select {
