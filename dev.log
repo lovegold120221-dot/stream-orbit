@@ -139,3 +139,4 @@
 [web]   Reload env: .env.local
 [web]  GET /session/test-room/room 200 in 92ms (next.js: 33ms, application-code: 60ms)
 [web]  GET /session/test-room 200 in 47ms (next.js: 8ms, application-code: 39ms)
+[web] pnpm run dev:web exited with code 0
