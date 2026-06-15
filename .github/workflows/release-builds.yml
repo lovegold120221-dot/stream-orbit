@@ -1,0 +1,116 @@
+# Orbit Meeting — Cross-platform Release Builds (superseded)
+# This workflow is superseded by signed-release.yml which includes
+# macOS code signing + notarization.
+#
+# Use .github/workflows/signed-release.yml instead.
+# Remove this file once the signed workflow is confirmed working.
+
+name: Release Builds (Win + Linux) — DEPRECATED
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build for (e.g. v1.0.2)"
+        required: true
+        type: string
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  build-windows:
+    name: "Windows (x64 + arm64)"
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Next.js
+        run: pnpm build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: Build Electron (Windows)
+        run: npx electron-builder --config electron-builder.yml --win --x64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Electron (Windows arm64)
+        run: npx electron-builder --config electron-builder.yml --win --arm64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload assets to release
+        run: |
+          set -e
+          gh release upload "${{ inputs.tag }}" dist-electron/*.exe --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    name: "Linux (x86_64 + arm64)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev libnss3-dev libatk1.0-0 \
+            libatk-bridge2.0-0 libcups2 libdrm2 libxdamage1 libxfixes3 \
+            libxkbcommon0 libpango-1.0-0 libcairo2 libasound2
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Next.js
+        run: pnpm build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: Build Electron (Linux x64)
+        run: npx electron-builder --config electron-builder.yml --linux --x64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Electron (Linux arm64)
+        run: npx electron-builder --config electron-builder.yml --linux --arm64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload assets to release
+        run: |
+          set -e
+          gh release upload "${{ inputs.tag }}" dist-electron/*.AppImage dist-electron/*.deb --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,245 @@
+# Orbit Meeting — Signed Cross-Platform Release Builds
+# Builds, signs, and notarizes macOS Electron installers.
+# Builds Windows, Linux, and Android installers on native runners.
+# Triggered manually after a release tag is pushed.
+# Uploads all artifacts to the existing GitHub release.
+
+name: Signed Release Builds
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build for (e.g. v1.0.2)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  build-macos-signed:
+    name: "macOS (signed + notarized, x64 + arm64)"
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Import signing certificate
+        run: bash scripts/import-cert.sh
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+
+      - name: Build Next.js
+        run: pnpm build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: Build + notarize macOS (x64)
+        run: |
+          if [ -f /tmp/certificate.p12 ]; then
+            CSC_LINK=/tmp/certificate.p12 \
+            npx electron-builder --config electron-builder.yml --mac --x64
+          else
+            echo "No signing certificate found — building unsigned"
+            npx electron-builder --config electron-builder.yml --mac --x64
+          fi
+        env:
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Build + notarize macOS (arm64)
+        run: |
+          if [ -f /tmp/certificate.p12 ]; then
+            CSC_LINK=/tmp/certificate.p12 \
+            npx electron-builder --config electron-builder.yml --mac --arm64
+          else
+            echo "No signing certificate found — building unsigned"
+            npx electron-builder --config electron-builder.yml --mac --arm64
+          fi
+        env:
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Create release if not exists
+        run: gh release create "${{ inputs.tag }}" --title "${{ inputs.tag }}" --generate-notes || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload assets to release
+        run: |
+          set -e
+          gh release upload "${{ inputs.tag }}" dist-electron/*.dmg dist-electron/*.zip --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows:
+    name: "Windows (x64 + arm64)"
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Next.js
+        run: pnpm build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: Build Electron (Windows x64 + arm64)
+        run: npx electron-builder --config electron-builder.yml --win --x64 --arm64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create release if not exists
+        run: gh release create "${{ inputs.tag }}" --title "${{ inputs.tag }}" --generate-notes || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload assets to release
+        run: |
+          set -e
+          gh release upload "${{ inputs.tag }}" dist-electron/*.exe --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    name: "Linux (x86_64 + arm64)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev libnss3-dev libatk1.0-0 \
+            libatk-bridge2.0-0 libcups2 libdrm2 libxdamage1 libxfixes3 \
+            libxkbcommon0 libpango-1.0-0 libcairo2 libasound2t64
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Next.js
+        run: pnpm build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: Build Electron (Linux x64)
+        run: npx electron-builder --config electron-builder.yml --linux --x64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Electron (Linux arm64)
+        run: npx electron-builder --config electron-builder.yml --linux --arm64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create release if not exists
+        run: gh release create "${{ inputs.tag }}" --title "${{ inputs.tag }}" --generate-notes || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload assets to release
+        run: |
+          set -e
+          gh release upload "${{ inputs.tag }}" dist-electron/*.AppImage dist-electron/*.deb --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-android:
+    name: "Android (APK)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build Next.js + copy web assets
+        run: npx cap sync android
+
+      - name: Build APK
+        run: cd android && ./gradlew assembleDebug
+
+      - name: Create release if not exists
+        run: gh release create "${{ inputs.tag }}" --title "${{ inputs.tag }}" --generate-notes || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload assets to release
+        run: |
+          set -e
+          gh release upload "${{ inputs.tag }}" android/app/build/outputs/apk/debug/app-debug.apk --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
