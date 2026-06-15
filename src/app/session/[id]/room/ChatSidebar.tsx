@@ -411,12 +411,11 @@ export default function ChatSidebar({
               </span>
             </div>
             {pendingAttachment.progress < 100 ? (
-              <div className="chat-attachment-pending-bar-track">
-                <div
-                  className="chat-attachment-pending-bar-fill"
-                  style={{ width: `${pendingAttachment.progress}%` }}
-                />
-              </div>
+              <progress
+                className="chat-attachment-progress-bar"
+                value={pendingAttachment.progress}
+                max={100}
+              />
             ) : (
               <button
                 className="chat-attachment-pending-remove"
@@ -451,6 +450,7 @@ export default function ChatSidebar({
             className="chat-sidebar-file-input"
             onChange={handleFilePick}
             accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml,application/pdf,text/plain,text/csv,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,audio/mpeg,audio/wav,audio/ogg,audio/mp4,video/mp4"
+            title="Upload file"
           />
           <input
             type="text"
@@ -510,7 +510,6 @@ function AttachmentView({ msg }: { msg: ChatMessage }) {
           controls
           preload="metadata"
           className="chat-attachment-video"
-          style={{ maxWidth: "100%", maxHeight: 240, borderRadius: 8 }}
         >
           Your browser does not support the video element.
         </video>
@@ -525,7 +524,7 @@ function AttachmentView({ msg }: { msg: ChatMessage }) {
           src={msg.attachmentUrl}
           controls
           preload="none"
-          style={{ width: "100%", height: 40 }}
+          className="chat-attachment-audio"
         >
           Your browser does not support the audio element.
         </audio>

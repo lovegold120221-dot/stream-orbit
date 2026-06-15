@@ -15,7 +15,7 @@ import {
 export default function HistoryPage() {
   const router = useRouter();
   const { profile, loading: profileLoading } = useUser();
-  const theme = profile?.theme || "dark";
+  const theme = profile?.theme || "system";
   const [entries, setEntries] = useState<TranslationHistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -74,7 +74,7 @@ export default function HistoryPage() {
 
   // Filter by search query
   const filteredGroups = Object.entries(grouped)
-    .map(([key, group]) => ({
+    .map(([, group]) => ({
       ...group,
       entries: searchQuery
         ? group.entries.filter(
@@ -97,7 +97,7 @@ export default function HistoryPage() {
     });
 
   return (
-    <main className="history-shell" data-theme={theme}>
+    <main className="history-shell" data-theme-preference={theme}>
       {/* Header (Matching Settings Style) */}
       <header className="settings-topbar">
         <div className="settings-topbar-left">

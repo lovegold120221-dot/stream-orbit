@@ -12,7 +12,10 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: "#6366f1",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f7f5ef" },
+    { media: "(prefers-color-scheme: dark)", color: "#11100f" },
+  ],
 };
 
 export const metadata: Metadata = {
@@ -35,7 +38,7 @@ export const metadata: Metadata = {
   },
   other: {
     "mobile-web-app-capable": "yes",
-    "msapplication-TileColor": "#0a0a0f",
+    "msapplication-TileColor": "#11100f",
     "msapplication-TileImage": "/icons/mstile-150x150.png",
   },
 };
@@ -56,12 +59,16 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `
               try {
-                var theme = localStorage.getItem('orbit.theme');
-                if (theme) {
-                  document.documentElement.dataset.theme = theme;
-                } else {
-                  document.documentElement.dataset.theme = 'dark';
+                var preference = localStorage.getItem('orbit.theme') || 'system';
+                if (preference !== 'system' && preference !== 'dark' && preference !== 'light') {
+                  preference = 'system';
                 }
+                var resolved = preference === 'system'
+                  ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+                  : preference;
+                document.documentElement.dataset.theme = resolved;
+                document.documentElement.dataset.themePreference = preference;
+                document.documentElement.style.colorScheme = resolved;
               } catch (e) {}
             `,
           }}

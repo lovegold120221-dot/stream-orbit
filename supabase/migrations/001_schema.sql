@@ -26,7 +26,7 @@ DROP FUNCTION IF EXISTS public.handle_new_user();
 CREATE TABLE public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   name TEXT DEFAULT '',
-  theme TEXT DEFAULT 'dark' CHECK (theme IN ('light', 'dark')),
+  theme TEXT DEFAULT 'system' CHECK (theme IN ('system', 'light', 'dark')),
   default_language TEXT DEFAULT 'en',
   voice TEXT DEFAULT 'Orus',
   mic_device_id TEXT,

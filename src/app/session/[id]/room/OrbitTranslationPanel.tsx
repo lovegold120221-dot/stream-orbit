@@ -267,14 +267,20 @@ export default function OrbitTranslationPanel({
               
             </div>
           ) : (
-            sourceEntries.map((entry) => (
-              <div className="captions-entry" key={entry.key}>
-                <p className="captions-text">
-                  <strong>{names.get(entry.sourceIdentity) ?? entry.sourceIdentity}:</strong>{" "}
-                  {entry.sourceText}
-                </p>
-              </div>
-            ))
+            sourceEntries.map((entry) => {
+              const parsed = parseSpeakerText(
+                entry.sourceText,
+                names.get(entry.sourceIdentity) ?? entry.sourceIdentity
+              );
+              return (
+                <div className="captions-entry" key={entry.key}>
+                  <p className="captions-text">
+                    <strong>{parsed.speaker}:</strong>{" "}
+                    {parsed.dialogue}
+                  </p>
+                </div>
+              );
+            })
           )}
         </div>
 
@@ -289,23 +295,31 @@ export default function OrbitTranslationPanel({
               
             </div>
           ) : (
-            translatedEntries.map((entry) => (
-              <div 
-                className="captions-entry" 
-                key={entry.key}
-                onDoubleClick={() => setAdjustingEntry({ key: entry.key, text: entry.translatedText, sourceText: entry.sourceText })}
-                title="Double click to change tone / re-translate"
-              >
-                {entry.sourceLang && (
-                  <div className="captions-speaker">
-                    <span className="captions-speaker-lang">
-                      {getLanguageByCode(entry.sourceLang)?.name || entry.sourceLang} → {getLanguageByCode(myLang)?.name || myLang}
-                    </span>
-                  </div>
-                )}
-                <p className="captions-text captions-text--translated">
-                  <strong>Orbit Translator:</strong> {entry.translatedText}
-                </p>
+            translatedEntries.map((entry) => {
+              const parsed = parseSpeakerText(entry.translatedText, "Orbit Translator");
+              return (
+                <div
+                  className="captions-entry"
+                  key={entry.key}
+                  onDoubleClick={() => setAdjustingEntry({ key: entry.key, text: entry.translatedText, sourceText: entry.sourceText })}
+                  title="Double click to change tone / re-translate"
+                >
+                  {entry.sourceLang && (
+                    <div className="captions-speaker">
+                      <span className="captions-speaker-lang">
+                        {getLanguageByCode(entry.sourceLang)?.name || entry.sourceLang} → {getLanguageByCode(myLang)?.name || myLang}
+                      </span>
+                    </div>
+                  )}
+                  <p className="captions-text captions-text--translated">
+                    <strong>
+                      {parsed.speaker === "Orbit Translator"
+                        ? "Orbit Translator"
+                        : `${parsed.speaker} (Translated)`}
+                      :
+                    </strong>{" "}
+                    {parsed.dialogue}
+                  </p>
                 {adjustingEntry?.key === entry.key && (
                   <div className="retranslate-dialog" onClick={(e) => e.stopPropagation()}>
                     <div className="retranslate-header">Change Tone / Re-translate</div>
@@ -341,10 +355,29 @@ export default function OrbitTranslationPanel({
                   </div>
                 )}
               </div>
-            ))
+            );
+          })
           )}
         </div>
       </div>
     </div>
   );
+}
+
+// Extract bracketed speaker tags (e.g. [A], [John]) and return clean speaker + dialogue.
+function parseSpeakerText(
+  text: string,
+  defaultSpeaker: string
+): { speaker: string; dialogue: string } {
+  const match = text.match(/^\[([^\]]+)\]\s*([\s\S]*)/);
+  if (match) {
+    return {
+      speaker: match[1].trim(),
+      dialogue: match[2].trim(),
+    };
+  }
+  return {
+    speaker: defaultSpeaker,
+    dialogue: text,
+  };
 }

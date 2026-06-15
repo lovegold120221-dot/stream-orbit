@@ -3,10 +3,12 @@
   "short_name": "Orbit",
   "description": "Real-time meeting translation with Gemini AI — speak any language, hear in yours.",
   "start_url": "/",
+  "id": "/",
   "display": "standalone",
-  "background_color": "#0a0a0f",
-  "theme_color": "#6366f1",
-  "orientation": "portrait-primary",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui", "browser"],
+  "background_color": "#11100f",
+  "theme_color": "#11100f",
+  "orientation": "any",
   "scope": "/",
   "icons": [
     {

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@/context/UserContext";
@@ -12,7 +13,6 @@ export default function Home() {
   const router = useRouter();
   const { user, loading: authLoading, signOut } = useAuth();
   const [creating, setCreating] = useState(false);
-  const [authCheckDone, setAuthCheckDone] = useState(false);
   // All hooks must be called before any conditional returns (Rules of Hooks).
   const [activePanel, setActivePanel] = useState<ActivePanel>("join");
   const [joinValue, setJoinValue] = useState("");
@@ -21,31 +21,22 @@ export default function Home() {
   const [scheduleTime, setScheduleTime] = useState("");
   const [scheduledLink, setScheduledLink] = useState("");
   const [copied, setCopied] = useState(false);
-  const { profile, updateProfile } = useUser();
-  const theme = profile?.theme || "dark";
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
+  const { profile } = useUser();
+  const theme = profile?.theme || "system";
+  const supabaseConfigured = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
+  const waitingForAuth = supabaseConfigured && authLoading;
+  const redirectingToAuth = supabaseConfigured && !authLoading && !user;
 
   // Redirect unauthenticated users to the login page.
   // Skip redirect if Supabase isn't configured (anonymous usage).
   useEffect(() => {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!supabaseUrl) {
-      // Supabase not configured — skip auth and show landing directly.
-      setAuthCheckDone(true);
-      return;
-    }
-    if (authLoading) return;
-    setAuthCheckDone(true);
-    if (!user) {
+    if (redirectingToAuth) {
       router.replace("/auth/login");
     }
-  }, [user, authLoading, router]);
+  }, [redirectingToAuth, router]);
 
   // Show nothing while auth state is loading or redirecting.
-  if (!authCheckDone) {
+  if (waitingForAuth) {
     return (
       <main className="auth-shell">
         <div className="auth-card">
@@ -54,7 +45,7 @@ export default function Home() {
       </main>
     );
   }
-  if (!user && process.env.NEXT_PUBLIC_SUPABASE_URL) return null; // Redirecting
+  if (redirectingToAuth) return null;
 
   function createSession() {
     setCreating(true);
@@ -112,43 +103,31 @@ export default function Home() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  function toggleTheme() {
-    updateProfile({ theme: theme === "dark" ? "light" : "dark" });
-  }
-
   return (
-    <main className="entry-shell" data-theme={theme}>
+    <main className="entry-shell" data-theme-preference={theme}>
 
       <section className="entry-main">
         <header className="entry-topbar">
-          <div className="entry-topbar-left">
-            <div className="entry-brand">
-              <img src="/icon-eburon.svg" alt="Eburon AI" className="entry-brand-logo" />
-              <span>Orbit Meeting</span>
+          <div className="entry-topbar-inner">
+            <div className="entry-topbar-left">
+              <div className="entry-brand">
+                <Image src="/icon-eburon.svg" alt="Eburon AI" width={34} height={34} className="entry-brand-logo" unoptimized />
+                <span>Orbit Meeting</span>
+              </div>
             </div>
-
-          </div>
-          <div className="entry-topbar-actions">
-            <button
-              className="entry-theme-toggle"
-              type="button"
-              onClick={toggleTheme}
-              aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-            >
-              <ThemeIcon />
-              <span>{theme === "dark" ? "Light" : "Dark"}</span>
-            </button>
-            {user ? (
-              <div className="entry-auth-section">
-                <span className="entry-auth-email" title={user.email ?? ""}>{user.email}</span>
-                <button className="entry-auth-btn" onClick={() => signOut()}>Sign out</button>
-              </div>
-            ) : (
-              <div className="entry-auth-section">
-                <Link href="/auth/login" className="entry-auth-btn">Sign in</Link>
-                <Link href="/auth/signup" className="entry-auth-btn">Create account</Link>
-              </div>
-            )}
+            <div className="entry-topbar-actions">
+              {user ? (
+                <div className="entry-auth-section">
+                  <span className="entry-auth-email" title={user.email ?? ""}>{user.email}</span>
+                  <button className="entry-auth-btn" onClick={() => signOut()}>Sign out</button>
+                </div>
+              ) : (
+                <div className="entry-auth-section">
+                  <Link href="/auth/login" className="entry-auth-btn">Sign in</Link>
+                  <Link href="/auth/signup" className="entry-auth-btn">Create account</Link>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -350,21 +329,3 @@ function CalendarIcon() {
     </svg>
   );
 }
-
-function ThemeIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="4" />
-      <path d="M12 2v2" />
-      <path d="M12 20v2" />
-      <path d="m4.93 4.93 1.41 1.41" />
-      <path d="m17.66 17.66 1.41 1.41" />
-      <path d="M2 12h2" />
-      <path d="M20 12h2" />
-      <path d="m6.34 17.66-1.41 1.41" />
-      <path d="m19.07 4.93-1.41 1.41" />
-    </svg>
-  );
-}
-
-

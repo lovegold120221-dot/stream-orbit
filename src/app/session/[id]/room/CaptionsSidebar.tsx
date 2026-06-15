@@ -109,23 +109,57 @@ export default function CaptionsSidebar({
             No captions yet. Translation transcripts will appear here as people speak.
           </div>
         ) : (
-          entries.map((entry) => (
-            <div className="captions-entry" key={entry.key}>
-              {entry.sourceText && (
-                <p className="captions-text">
-                  <strong>{names.get(entry.sourceIdentity) ?? entry.sourceIdentity}:</strong>{" "}
-                  {entry.sourceText}
-                </p>
-              )}
-              {entry.translatedText && (
-                <p className="captions-text captions-text--translated">
-                  <strong>Orbit Translator:</strong> {entry.translatedText}
-                </p>
-              )}
-            </div>
-          ))
+          entries.map((entry) => {
+            const parsedSource = parseSpeakerText(
+              entry.sourceText,
+              names.get(entry.sourceIdentity) ?? entry.sourceIdentity
+            );
+            const parsedTranslated = parseSpeakerText(
+              entry.translatedText,
+              "Orbit Translator"
+            );
+            return (
+              <div className="captions-entry" key={entry.key}>
+                {entry.sourceText && (
+                  <p className="captions-text">
+                    <strong>{parsedSource.speaker}:</strong>{" "}
+                    {parsedSource.dialogue}
+                  </p>
+                )}
+                {entry.translatedText && (
+                  <p className="captions-text captions-text--translated">
+                    <strong>
+                      {parsedTranslated.speaker === "Orbit Translator"
+                        ? "Orbit Translator"
+                        : `${parsedTranslated.speaker} (Translated)`}
+                      :
+                    </strong>{" "}
+                    {parsedTranslated.dialogue}
+                  </p>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </div>
   );
+}
+
+// Extract bracketed speaker tags (e.g. [A], [John]) and return clean speaker + dialogue.
+function parseSpeakerText(
+  text: string,
+  defaultSpeaker: string
+): { speaker: string; dialogue: string } {
+  const match = text.match(/^\[([^\]]+)\]\s*([\s\S]*)/);
+  if (match) {
+    return {
+      speaker: match[1].trim(),
+      dialogue: match[2].trim(),
+    };
+  }
+  return {
+    speaker: defaultSpeaker,
+    dialogue: text,
+  };
 }

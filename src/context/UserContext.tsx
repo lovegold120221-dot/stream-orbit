@@ -9,10 +9,12 @@ export type GlossaryEntry = {
   translation: string;  // preferred translation
 };
 
+export type ThemePreference = "system" | "light" | "dark";
+
 export type UserProfile = {
   id: string;
   name: string;
-  theme: "light" | "dark";
+  theme: ThemePreference;
   default_language: string;
   voice: string;
   // Audio
@@ -44,10 +46,12 @@ type UserContextType = {
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
+const THEME_STORAGE_KEY = "orbit.theme";
+
 const DEFAULT_PROFILE: UserProfile = {
   id: "",
   name: "",
-  theme: "dark",
+  theme: "system",
   default_language: "en",
   voice: "Orus",
   auto_join_audio: false,
@@ -63,6 +67,28 @@ const DEFAULT_PROFILE: UserProfile = {
   recording_save_path: "",
   recording_auto_start: false,
 };
+
+function normalizeThemePreference(theme: unknown): ThemePreference {
+  return theme === "light" || theme === "dark" || theme === "system"
+    ? theme
+    : "system";
+}
+
+function resolveThemePreference(theme: ThemePreference): "light" | "dark" {
+  if (theme !== "system") return theme;
+  if (typeof window === "undefined") return "dark";
+  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function applyThemePreference(theme: ThemePreference) {
+  if (typeof window === "undefined") return;
+  const normalized = normalizeThemePreference(theme);
+  const resolved = resolveThemePreference(normalized);
+  document.documentElement.dataset.theme = resolved;
+  document.documentElement.dataset.themePreference = normalized;
+  document.documentElement.style.colorScheme = resolved;
+  window.localStorage.setItem(THEME_STORAGE_KEY, normalized);
+}
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading } = useAuth();
@@ -82,18 +108,24 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           window.localStorage.setItem("orbitUserId", anonId);
         }
 
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from("profiles")
           .select("*")
           .eq("id", anonId)
           .single();
 
         if (data) {
-          setProfile(data);
-          document.documentElement.dataset.theme = data.theme || "dark";
+          const loadedProfile = {
+            ...DEFAULT_PROFILE,
+            ...data,
+            theme: normalizeThemePreference(data.theme),
+          };
+          setProfile(loadedProfile);
+          applyThemePreference(loadedProfile.theme);
         } else {
           const anonProfile = { ...DEFAULT_PROFILE, id: anonId };
           setProfile(anonProfile);
+          applyThemePreference(anonProfile.theme);
           try {
             await supabase.from("profiles").upsert(anonProfile);
           } catch {
@@ -106,20 +138,26 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
       // Logged in — use auth user ID
       try {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from("profiles")
           .select("*")
           .eq("id", user.id)
           .single();
 
         if (data) {
-          setProfile(data);
-          document.documentElement.dataset.theme = data.theme || "dark";
+          const loadedProfile = {
+            ...DEFAULT_PROFILE,
+            ...data,
+            theme: normalizeThemePreference(data.theme),
+          };
+          setProfile(loadedProfile);
+          applyThemePreference(loadedProfile.theme);
         } else {
           // Profile should have been auto-created by the DB trigger,
           // but just in case, create it now
           const newProfile: UserProfile = { ...DEFAULT_PROFILE, id: user.id, name: user.user_metadata?.name || "" };
           setProfile(newProfile);
+          applyThemePreference(newProfile.theme);
           try {
             await supabase.from("profiles").upsert(newProfile);
           } catch {
@@ -136,15 +174,21 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     loadProfile();
   }, [user, authLoading]);
 
+  useEffect(() => {
+    if (profile?.theme !== "system") return;
+    const media = window.matchMedia("(prefers-color-scheme: light)");
+    const syncSystemTheme = () => applyThemePreference("system");
+    syncSystemTheme();
+    media.addEventListener("change", syncSystemTheme);
+    return () => media.removeEventListener("change", syncSystemTheme);
+  }, [profile?.theme]);
+
   const updateProfile = async (updates: Partial<UserProfile>) => {
     if (!profile) return;
-    const newProfile = { ...profile, ...updates };
+    const theme = normalizeThemePreference(updates.theme ?? profile.theme);
+    const newProfile = { ...profile, ...updates, theme };
     setProfile(newProfile);
-
-    if (updates.theme) {
-      document.documentElement.dataset.theme = updates.theme;
-      window.localStorage.setItem("orbit.theme", updates.theme);
-    }
+    applyThemePreference(theme);
 
     try {
       await supabase.from("profiles").upsert(newProfile);

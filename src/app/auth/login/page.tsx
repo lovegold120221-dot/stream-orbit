@@ -33,7 +33,7 @@ export default function LoginPage() {
     <main className="auth-shell">
       <div className="auth-card">
         <div className="auth-brand">
-          <div className="auth-logo-bg"><Image src="/icon-eburon.svg" alt="Eburon AI" width={24} height={24} className="auth-brand-logo" /></div>
+          <div className="auth-logo-bg"><Image src="/icon-eburon.svg" alt="Eburon AI" width={85} height={85} className="auth-brand-logo" unoptimized /></div>
           <span>Orbit Meeting</span>
         </div>
         <h1 className="auth-title">Sign in</h1>

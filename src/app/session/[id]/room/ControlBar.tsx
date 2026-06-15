@@ -29,6 +29,75 @@ import {
   HandRaiseIcon,
 } from "./icons";
 
+type NativeScreenShareBridge = {
+  startScreenShare: () => void;
+  stopScreenShare: () => void;
+};
+
+type NativeScreenShareWindow = Window & {
+  NativeScreenShare?: NativeScreenShareBridge;
+  onNativeScreenShareFrame?: (dataUrl: string) => void;
+};
+
+function getNativeScreenShareBridge() {
+  if (typeof window === "undefined") return undefined;
+  return (window as unknown as NativeScreenShareWindow).NativeScreenShare;
+}
+
+function getShareErrorMessage(error: unknown) {
+  if (error instanceof DOMException && (error.name === "AbortError" || error.name === "NotAllowedError")) {
+    return "Screen sharing was cancelled.";
+  }
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function waitForNativeScreenShareFrame(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) {
+  return new Promise<void>((resolve, reject) => {
+    let ready = false;
+    const timeout = window.setTimeout(() => {
+      if (!ready) {
+        reject(new Error("Screen capture permission did not return a frame."));
+      }
+    }, 12000);
+
+    (window as unknown as NativeScreenShareWindow).onNativeScreenShareFrame = (dataUrl: string) => {
+      if (dataUrl === "error:PermissionDenied") {
+        if (!ready) {
+          window.clearTimeout(timeout);
+          reject(new Error("Screen capture permission was denied."));
+        }
+        return;
+      }
+
+      const img = new Image();
+      img.onload = () => {
+        if (!ready) {
+          canvas.width = img.naturalWidth || 360;
+          canvas.height = img.naturalHeight || 640;
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        if (!ready) {
+          ready = true;
+          window.clearTimeout(timeout);
+          resolve();
+        }
+      };
+      img.onerror = () => {
+        if (!ready) {
+          window.clearTimeout(timeout);
+          reject(new Error("The native screen capture frame could not be decoded."));
+        }
+      };
+      img.src = dataUrl;
+    };
+  });
+}
+
 export default function ControlBar({
   onLeave,
   activeSidebar,
@@ -52,9 +121,13 @@ export default function ControlBar({
   const [isLocalRecording, setIsLocalRecording] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [shareWithAudio, setShareWithAudio] = useState(true);
+  const [shareStarting, setShareStarting] = useState(false);
+  const [shareError, setShareError] = useState("");
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const customScreenShareTrackRef = useRef<MediaStreamTrack | null>(null);
+  const [customScreenShareOn, setCustomScreenShareOn] = useState(false);
+  const shareConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
 
@@ -83,6 +156,33 @@ export default function ControlBar({
     cameraTrack.source === Track.Source.Camera &&
     !cameraTrack.isMuted;
   const screenShareOn = localParticipant.isScreenShareEnabled;
+  const nativeScreenShare = getNativeScreenShareBridge();
+  const browserScreenShareSupported =
+    typeof navigator !== "undefined" &&
+    Boolean(navigator.mediaDevices?.getDisplayMedia);
+  const screenShareActive = screenShareOn || customScreenShareOn;
+  const screenAudioAvailable = !nativeScreenShare;
+  const canStartScreenShare = Boolean(nativeScreenShare || browserScreenShareSupported);
+
+  useEffect(() => {
+    if (!showShareDialog) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !shareStarting) {
+        setShowShareDialog(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    const focusTimer = window.setTimeout(() => {
+      shareConfirmButtonRef.current?.focus();
+    }, 0);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.clearTimeout(focusTimer);
+    };
+  }, [showShareDialog, shareStarting]);
 
   async function toggleMic() {
     await localParticipant.setMicrophoneEnabled(!micOn);
@@ -91,68 +191,87 @@ export default function ControlBar({
     await localParticipant.setCameraEnabled(!camOn);
   }
   async function handleShareScreen() {
-    if (screenShareOn || customScreenShareTrackRef.current) {
-      // Stop sharing immediately
-      const nativeScreenShare = (window as unknown as { NativeScreenShare?: { startScreenShare: () => void; stopScreenShare: () => void } }).NativeScreenShare;
-      if (nativeScreenShare) {
-        nativeScreenShare.stopScreenShare();
-        delete (window as unknown as { onNativeScreenShareFrame?: (dataUrl: string) => void }).onNativeScreenShareFrame;
-      }
-
-      if (customScreenShareTrackRef.current) {
-        const track = customScreenShareTrackRef.current;
-        track.stop();
-        await localParticipant.unpublishTrack(track);
-        customScreenShareTrackRef.current = null;
-      } else {
-        await localParticipant.setScreenShareEnabled(false);
-      }
+    if (screenShareActive) {
+      await stopShareScreen();
       return;
     }
 
-    // Show dialog to choose options
+    setShareError("");
+    setShowMoreMenu(false);
+    setShowReactions(false);
     setShowShareDialog(true);
   }
 
-  async function confirmShareScreen() {
-    setShowShareDialog(false);
+  async function stopShareScreen() {
+    setShareError("");
+    setShareStarting(false);
 
-    const nativeScreenShare = (window as unknown as { NativeScreenShare?: { startScreenShare: () => void; stopScreenShare: () => void } }).NativeScreenShare;
-    if (nativeScreenShare) {
+    const nativeShare = getNativeScreenShareBridge();
+    if (nativeShare) {
+      nativeShare.stopScreenShare();
+      delete (window as unknown as NativeScreenShareWindow).onNativeScreenShareFrame;
+    }
+
+    if (customScreenShareTrackRef.current) {
+      const track = customScreenShareTrackRef.current;
+      track.stop();
+      await localParticipant.unpublishTrack(track);
+      customScreenShareTrackRef.current = null;
+      setCustomScreenShareOn(false);
+    }
+
+    if (screenShareOn) {
+      await localParticipant.setScreenShareEnabled(false);
+    }
+  }
+
+  async function confirmShareScreen() {
+    const nativeShare = getNativeScreenShareBridge();
+    if (!nativeShare && !browserScreenShareSupported) {
+      setShareError("Screen sharing is not available in this browser.");
+      return;
+    }
+
+    setShareError("");
+    setShareStarting(true);
+
+    if (nativeShare) {
       try {
         const canvas = document.createElement("canvas");
         canvas.width = 360;
         canvas.height = 640;
         const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          throw new Error("Could not create a screen share canvas.");
+        }
 
-        (window as unknown as { onNativeScreenShareFrame?: (dataUrl: string) => void }).onNativeScreenShareFrame = (dataUrl: string) => {
-          if (dataUrl === "error:PermissionDenied") {
-            alert("Native screen share permission denied");
-            return;
-          }
-          const img = new Image();
-          img.onload = () => {
-            if (ctx) {
-              ctx.clearRect(0, 0, canvas.width, canvas.height);
-              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            }
-          };
-          img.src = dataUrl;
-        };
+        const firstFrame = waitForNativeScreenShareFrame(canvas, ctx);
+        nativeShare.startScreenShare();
+        await firstFrame;
 
-        nativeScreenShare.startScreenShare();
-
-        const stream = canvas.captureStream(5);
+        const stream = canvas.captureStream(8);
         const track = stream.getVideoTracks()[0];
+        if (!track) {
+          throw new Error("Could not create a native screen share track.");
+        }
         customScreenShareTrackRef.current = track;
+        track.addEventListener("ended", () => {
+          customScreenShareTrackRef.current = null;
+          setCustomScreenShareOn(false);
+        });
 
         await localParticipant.publishTrack(track, {
           name: "screen",
           source: Track.Source.ScreenShare,
         });
+        setCustomScreenShareOn(true);
+        setShowShareDialog(false);
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        alert("Failed to start native screen share: " + msg);
+        nativeShare.stopScreenShare();
+        delete (window as unknown as NativeScreenShareWindow).onNativeScreenShareFrame;
+        setShareError(`Failed to start native screen share: ${getShareErrorMessage(e)}`);
+      } finally {
+        setShareStarting(false);
       }
       return;
     }
@@ -160,10 +279,17 @@ export default function ControlBar({
     try {
       await localParticipant.setScreenShareEnabled(true, {
         audio: shareWithAudio,
+        video: true,
+        systemAudio: shareWithAudio ? "include" : "exclude",
+        surfaceSwitching: "include",
+        selfBrowserSurface: "include",
+        contentHint: "detail",
       });
+      setShowShareDialog(false);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      alert("Failed to start screen share: " + msg);
+      setShareError(`Failed to start screen share: ${getShareErrorMessage(e)}`);
+    } finally {
+      setShareStarting(false);
     }
   }
   async function toggleRecording() {
@@ -306,9 +432,9 @@ export default function ControlBar({
           dataMobile="overflow"
         />
         <CtrlButton
-          active={screenShareOn}
+          active={screenShareActive}
           onClick={handleShareScreen}
-          label="Share"
+          label={screenShareActive ? "Stop Share" : "Share"}
           icon={<ShareScreenIcon />}
           dataMobile="primary-share"
           hasCaret
@@ -378,7 +504,7 @@ export default function ControlBar({
         {/* Mobile only */}
         <CtrlButton
           active={showMoreMenu}
-          onClick={() => setShowMoreMenu(true)}
+          onClick={() => setShowMoreMenu((v) => !v)}
           label="More"
           icon={<MoreIcon />}
           dataMobile="more"
@@ -388,7 +514,13 @@ export default function ControlBar({
       {/* ——— Mobile "More" Menu ——— */}
       {showMoreMenu && (
         <div className="mobile-more-overlay" onClick={() => setShowMoreMenu(false)}>
-          <div className="mobile-more-menu" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="mobile-more-menu"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="More meeting options"
+          >
             <div className="mobile-more-header">
               <h3>More Options</h3>
               <button className="mobile-more-close" onClick={() => setShowMoreMenu(false)} title="Close menu" aria-label="Close menu">
@@ -441,39 +573,90 @@ export default function ControlBar({
 
       {/* ——— Share Screen Dialog ——— */}
       {showShareDialog && (
-        <div className="share-dialog-overlay" onClick={() => setShowShareDialog(false)}>
-          <div className="share-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3 className="share-dialog-title">Share Screen</h3>
-            <p className="share-dialog-desc">Choose what to share</p>
-            <label className="share-dialog-option">
-              <input
-                type="checkbox"
-                checked={shareWithAudio}
-                onChange={(e) => setShareWithAudio(e.target.checked)}
-              />
+        <div
+          className="share-dialog-overlay"
+          onClick={() => {
+            if (!shareStarting) setShowShareDialog(false);
+          }}
+        >
+          <section
+            className="share-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="share-dialog-title"
+            aria-describedby="share-dialog-desc"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="share-dialog-header">
+              <span className="share-dialog-icon" aria-hidden>
+                <ShareScreenIcon />
+              </span>
+              <div>
+                <h3 className="share-dialog-title" id="share-dialog-title">Share screen</h3>
+                <p className="share-dialog-desc" id="share-dialog-desc">
+                  Start a screen share for this meeting.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="share-dialog-close"
+                onClick={() => setShowShareDialog(false)}
+                disabled={shareStarting}
+                aria-label="Close share screen dialog"
+              >
+                <span aria-hidden>×</span>
+              </button>
+            </div>
+
+            {!canStartScreenShare && (
+              <div className="share-dialog-error" role="status">
+                Screen sharing is not available in this browser.
+              </div>
+            )}
+
+            {shareError && (
+              <div className="share-dialog-error" role="alert">
+                {shareError}
+              </div>
+            )}
+
+            <label className={`share-dialog-option${screenAudioAvailable ? "" : " share-dialog-option--disabled"}`}>
               <span className="share-dialog-option-icon">
                 <SpeakerIcon />
               </span>
               <span className="share-dialog-option-text">
-                <strong>Share computer sound</strong>
-                <small>Also transmit system audio</small>
+                <strong>Computer sound</strong>
+                <small>{screenAudioAvailable ? "Include system audio when supported" : "Not available for this share mode"}</small>
               </span>
+              <input
+                type="checkbox"
+                checked={screenAudioAvailable && shareWithAudio}
+                onChange={(e) => setShareWithAudio(e.target.checked)}
+                disabled={!screenAudioAvailable || shareStarting}
+                aria-label="Share computer sound"
+              />
             </label>
+
             <div className="share-dialog-actions">
               <button
+                type="button"
                 className="share-dialog-btn share-dialog-btn-cancel"
+                disabled={shareStarting}
                 onClick={() => setShowShareDialog(false)}
               >
                 Cancel
               </button>
               <button
+                ref={shareConfirmButtonRef}
+                type="button"
                 className="share-dialog-btn share-dialog-btn-confirm"
+                disabled={shareStarting || !canStartScreenShare}
                 onClick={confirmShareScreen}
               >
-                Share
+                {shareStarting ? "Starting..." : "Share"}
               </button>
             </div>
-          </div>
+          </section>
         </div>
       )}
     </div>

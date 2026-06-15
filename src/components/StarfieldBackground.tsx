@@ -95,6 +95,7 @@ export default function StarfieldBackground() {
   return (
     <canvas
       ref={canvasRef}
+      className="starfield-background"
       style={{
         position: "fixed",
         top: 0,

@@ -79,7 +79,7 @@ CREATE TRIGGER on_meeting_updated
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   name TEXT DEFAULT '',
-  theme TEXT DEFAULT 'dark' CHECK (theme IN ('light', 'dark')),
+  theme TEXT DEFAULT 'system' CHECK (theme IN ('system', 'light', 'dark')),
   default_language TEXT DEFAULT 'en',
   voice TEXT DEFAULT 'Orus',
   mic_device_id TEXT,

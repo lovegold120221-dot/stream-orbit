@@ -21,7 +21,7 @@
     "electron:build:win": "pnpm build && electron-builder --config electron-builder.yml --win",
     "electron:build:linux": "pnpm build && electron-builder --config electron-builder.yml --linux",
     "lint": "eslint",
-    "pwa:icons": "cd public && magick convert icon.svg -resize 192x192 icons/icon-192x192.png && magick convert icon.svg -resize 512x512 icons/icon-512x512.png && magick convert icon.svg -resize 180x180 icons/apple-touch-icon.png && magick convert icon.svg -resize 96x96 icons/favicon-96x96.png && magick convert icon.svg -resize 16x16 favicon.ico && magick convert icon.svg -resize 150x150 icons/mstile-150x150.png",
+    "pwa:icons": "cd public && cp icon-eburon.svg icon.svg && magick -background none icon-eburon.svg -resize 192x192 icons/icon-192x192.png && magick -background none icon-eburon.svg -resize 512x512 icons/icon-512x512.png && magick -background none icon-eburon.svg -resize 180x180 icons/apple-touch-icon.png && magick -background none icon-eburon.svg -resize 96x96 icons/favicon-96x96.png && magick -background none icon-eburon.svg -define icon:auto-resize=64,48,32,16 favicon.ico && magick -background none icon-eburon.svg -resize 150x150 icons/mstile-150x150.png && cp favicon.ico ../src/app/favicon.ico",
     "mobile:sync": "npx cap sync android",
     "mobile:dev": "concurrently -n web,cap \"pnpm run dev:web\" \"wait-on http://localhost:3000 && CAP_SERVER_URL=http://localhost:3000 npx cap run android -l\"",
     "mobile:build": "pnpm build && npx cap copy android && cd android && ./gradlew assembleDebug",

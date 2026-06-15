@@ -1,6 +1,6 @@
 "use client";
 
-import { useUser, GlossaryEntry } from "@/context/UserContext";
+import { useUser, GlossaryEntry, type ThemePreference } from "@/context/UserContext";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { PICKER_LANGUAGES } from "@/lib/languages";
@@ -8,7 +8,7 @@ import { SettingsIcon } from "@/app/session/[id]/room/icons";
 import CameraPreview from "./CameraPreview";
 import TranslationPlayground from "./TranslationPlayground";
 
-type SettingsTab = "general" | "audio" | "video" | "translation" | "glossary" | "recording";
+type SettingsTab = "general" | "preferences" | "audio" | "video" | "translation" | "glossary" | "recording";
 
 const VOICES = [
   { id: "male1", label: "Male 1" },
@@ -19,6 +19,7 @@ const VOICES = [
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
+  { id: "preferences", label: "Preferences" },
   { id: "audio", label: "Audio" },
   { id: "video", label: "Video" },
   { id: "translation", label: "Translation" },
@@ -35,7 +36,7 @@ export default function SettingsPage() {
 
   // Local form state
   const [name, setName] = useState("");
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
+  const [theme, setTheme] = useState<ThemePreference>("system");
   const [defaultLanguage, setDefaultLanguage] = useState("en");
   const [contentType, setContentType] = useState<"normal" | "movie" | "cinematic_faithful">("normal");
   const [voice, setVoice] = useState("male1");
@@ -55,7 +56,7 @@ export default function SettingsPage() {
     if (profile) {
       const t = setTimeout(() => {
         setName(profile.name || "");
-        setTheme(profile.theme || "dark");
+        setTheme(profile.theme || "system");
         setDefaultLanguage(profile.default_language || "en");
         setContentType(profile.content_type || "normal");
         setVoice(profile.voice || "Orus");
@@ -113,7 +114,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="settings-shell" data-theme={theme}>
+    <main className="settings-shell" data-theme-preference={theme}>
       {/* Header */}
       <header className="settings-topbar">
         <div className="settings-topbar-left">
@@ -148,7 +149,11 @@ export default function SettingsPage() {
               <button
                 key={tab.id}
                 role="tab"
-                aria-selected={activeTab === tab.id}
+                ref={(el) => {
+                  if (el) {
+                    el.setAttribute("aria-selected", activeTab === tab.id ? "true" : "false");
+                  }
+                }}
                 className={`settings-tab-btn${activeTab === tab.id ? " settings-tab-btn--active" : ""}`}
                 onClick={() => setActiveTab(tab.id)}
               >
@@ -174,18 +179,7 @@ export default function SettingsPage() {
                   />
                 </div>
 
-                <div className="settings-field">
-                  <label className="settings-label">Theme</label>
-                  <select
-                    className="settings-select"
-                    value={theme}
-                    onChange={(e) => { setTheme(e.target.value as "light" | "dark"); markDirty(); }}
-                    aria-label="Theme"
-                  >
-                    <option value="dark">Dark</option>
-                    <option value="light">Light</option>
-                  </select>
-                </div>
+
 
                 <div className="settings-field">
                   <label className="settings-label">Language</label>
@@ -199,6 +193,33 @@ export default function SettingsPage() {
                       <option key={lang.code} value={lang.code}>{lang.flag} {lang.name}</option>
                     ))}
                   </select>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "preferences" && (
+              <div className="settings-tab">
+                <h2 className="settings-tab-title">Preferences</h2>
+                <p className="settings-tab-desc">Choose how Orbit Meeting looks and behaves on this device.</p>
+
+                <div className="settings-field">
+                  <label className="settings-label">Theme</label>
+                  <select
+                    className="settings-select"
+                    value={theme}
+                    onChange={(e) => {
+                      setTheme(e.target.value as ThemePreference);
+                      markDirty();
+                    }}
+                    aria-label="Theme"
+                  >
+                    <option value="system">System default</option>
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                  </select>
+                  <p className="settings-hint">
+                    System default follows your macOS, Windows, Linux, iOS, or Android appearance setting.
+                  </p>
                 </div>
               </div>
             )}

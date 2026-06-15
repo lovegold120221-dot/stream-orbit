@@ -1,0 +1,17 @@
+# actionlint configuration file to register custom repository secrets
+# This prevents linter warnings about invalid or undefined secret context.
+
+self-contained: true
+
+secrets:
+  - MACOS_CERTIFICATE_P12_BASE64
+  - MACOS_CERTIFICATE_PASSWORD
+  - APPLE_ID
+  - APPLE_APP_SPECIFIC_PASSWORD
+  - APPLE_TEAM_ID
+  - VERCEL_TOKEN
+  - NEXT_PUBLIC_SUPABASE_URL
+  - NEXT_PUBLIC_SUPABASE_ANON_KEY
+  - GITHUB_TOKEN
+  - VERCEL_PROJECT_ID
+  - VERCEL_ORG_ID

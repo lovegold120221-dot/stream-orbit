@@ -18,6 +18,7 @@ import { useUser } from "@/context/UserContext";
 import ControlBar from "./ControlBar";
 import ParticipantsPanel from "./ParticipantsPanel";
 import ChatSidebar from "./ChatSidebar";
+import CaptionsSidebar from "./CaptionsSidebar";
 import BreakoutSidebar from "./BreakoutSidebar";
 import ScreenShareView from "./ScreenShareView";
 import OrbitTranslationPanel from "./OrbitTranslationPanel";
@@ -38,7 +39,7 @@ export default function InCall({
   const [lang, setLang] = useState(initialLang);
   const [translatorMuted, setTranslatorMuted] = useState(false);
   const [activeSidebar, setActiveSidebar] = useState<"participants" | "captions" | "translation" | "chat" | "breakout" | null>("translation");
-  const [speakerMuted, setSpeakerMuted] = useState(false);
+  const [speakerMuted, setSpeakerMuted] = useState(true);
   const [headerCopied, setHeaderCopied] = useState(false);
   const [handRaised, setHandRaised] = useState(false);
   const [contentType, setContentType] = useState<"normal" | "movie" | "cinematic_faithful">(
@@ -175,6 +176,9 @@ export default function InCall({
   const shareUrl = typeof window !== "undefined"
     ? `${window.location.origin}/session/${room.name}`
     : "";
+  const shellClassName = `room-shell${
+    activeSidebar ? ` room-shell--sidebar-open room-shell--${activeSidebar}-open` : ""
+  }`;
 
   async function copyShareLink() {
     if (!shareUrl) return;
@@ -184,7 +188,7 @@ export default function InCall({
   }
 
   return (
-    <div className="room-shell">
+    <div className={shellClassName} data-sidebar={activeSidebar ?? "none"}>
       <div className="room">
         {/* Top chrome */}
         <header className="orbit-header">
@@ -241,10 +245,18 @@ export default function InCall({
 
           {/* Mobile topbar content — hidden on desktop */}
           <div className="orbit-topbar-mobile">
-            <button className="orbit-mobile-audio" aria-label="Audio">
-              <SpeakerIcon />
+            <button
+              className="orbit-mobile-audio"
+              aria-label={speakerMuted ? "Unmute speaker" : "Mute speaker"}
+              onClick={() => setSpeakerMuted((v) => !v)}
+            >
+              {speakerMuted ? <SpeakerOffIcon /> : <SpeakerIcon />}
             </button>
-            <button className="orbit-mobile-brand">
+            <button
+              className="orbit-mobile-brand"
+              onClick={() => toggleSidebar("translation")}
+              aria-label="Open translation controls"
+            >
               <ShieldCheckIcon style={{ color: "#22c55e", strokeWidth: 1.5, width: "18px", height: "18px" }} />
               <span>Orbit</span>
               <ChevronDownIcon />
@@ -277,6 +289,14 @@ export default function InCall({
               onClose={() => setActiveSidebar(null)}
               onToggleChat={() => toggleSidebar("chat")}
               reactions={reactions}
+            />
+          )}
+          {activeSidebar === "captions" && (
+            <CaptionsSidebar
+              open
+              onClose={() => setActiveSidebar(null)}
+              myLang={lang}
+              peerLangs={peerLangs}
             />
           )}
           {activeSidebar === "translation" && (
