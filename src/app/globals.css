@@ -3156,7 +3156,7 @@ html[data-theme="dark"] .auth-logo-bg {
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 24px;
-  padding: 28px;
+  padding: 28px 0;
   min-width: 0;
 }
 
@@ -3165,7 +3165,7 @@ html[data-theme="dark"] .auth-logo-bg {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding-bottom: 16px;
+  padding: 0 28px 16px;
   border-bottom: 1px solid var(--border-light);
 }
 
@@ -3217,6 +3217,8 @@ html[data-theme="dark"] .auth-logo-bg {
   grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
   gap: 24px;
   width: min(1040px, 100%);
+  padding: 0 28px;
+  box-sizing: border-box;
 }
 
 .entry-actions {
@@ -3427,7 +3429,7 @@ html[data-theme="dark"] .auth-logo-bg {
 
 @media (max-width: 640px) {
   .entry-main {
-    padding: 20px;
+    padding: 20px 0;
   }
 
   .entry-topbar {
