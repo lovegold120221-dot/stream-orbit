@@ -156,7 +156,18 @@ class TranslationRouter:
 
     async def _reconcile(self) -> None:
         async with self._reconcile_lock:
+            listeners = self._listener_target_langs()
+            speakers = self._active_speakers()
             desired = self._compute_desired_sessions()
+            
+            logger.info(
+                "Reconciling room=%s: listeners=%s, speakers=%s, desired_sessions=%s",
+                self._room.name,
+                listeners,
+                speakers,
+                desired
+            )
+            
             existing = set(self._sessions.keys())
 
             # Cancel any pending grace teardowns for sessions we still want.
