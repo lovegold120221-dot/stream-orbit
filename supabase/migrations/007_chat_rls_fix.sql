@@ -13,8 +13,10 @@
 DROP POLICY IF EXISTS chat_select_participant ON public.chat_messages;
 DROP POLICY IF EXISTS chat_select_anonymous ON public.chat_messages;
 DROP POLICY IF EXISTS chat_select_meeting ON public.chat_messages;
+DROP POLICY IF EXISTS chat_select_all ON public.chat_messages;
 DROP POLICY IF EXISTS chat_insert_own ON public.chat_messages;
 DROP POLICY IF EXISTS chat_insert_any ON public.chat_messages;
+DROP POLICY IF EXISTS chat_insert_all ON public.chat_messages;
 
 -- Allow anyone to SELECT chat messages (matching by meeting_id happens in the query)
 CREATE POLICY chat_select_all

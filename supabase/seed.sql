@@ -7,7 +7,7 @@
 -- =============================================
 
 -- Run the full migration
-\i supabase/migrations/001_schema.sql
+-- \i supabase/migrations/001_schema.sql
 
 -- =============================================
 -- 2. DEMO DATA (optional — delete for production)
