@@ -95,6 +95,10 @@ export default function InCall({
           // Store pre-generated token for the breakout room
           sessionStorage.setItem("orbit.breakout-token", payload.token);
           sessionStorage.setItem("orbit.breakout-server-url", payload.serverUrl || "");
+          // Store the breakout identity so RoomClient uses it instead of generating a new one
+          if (payload.breakoutIdentity) {
+            sessionStorage.setItem("orbit.breakout-identity", payload.breakoutIdentity);
+          }
         }
         alert("You have been assigned to a breakout room. Moving now...");
         router.push(`/session/${payload.newRoom}/room?returnTo=${payload.originalRoom}`);

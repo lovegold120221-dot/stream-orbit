@@ -79,6 +79,7 @@ export async function POST(req: NextRequest) {
           originalRoom,
           token,
           serverUrl,
+          breakoutIdentity: `${identity}-breakout`,
         });
         const data = new TextEncoder().encode(payload);
         await roomService.sendData(originalRoom, data, 1, {

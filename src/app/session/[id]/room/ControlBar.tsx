@@ -147,7 +147,6 @@ export default function ControlBar({
       fromId: localParticipant.identity,
     }));
     localParticipant.publishData(data, { topic: "react", reliable: true });
-    onToggleHand();
   };
 
   const handleCopyLink = () => {

@@ -24,11 +24,21 @@ export default function RoomClient({ sessionId }: { sessionId: string }) {
   const [token, setToken] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [identity] = useState(() =>
-    typeof crypto !== "undefined" && crypto.randomUUID
+
+  // For breakout rooms: use the pre-generated identity from the breakout API.
+  // Read synchronously during render (not in useEffect) so useState can use it.
+  const breakoutIdentity =
+    typeof window !== "undefined"
+      ? window.sessionStorage.getItem("orbit.breakout-identity")
+      : null;
+
+  const [identity] = useState(() => {
+    // Breakout rooms use the identity from the pre-generated token.
+    if (breakoutIdentity) return breakoutIdentity;
+    return typeof crypto !== "undefined" && crypto.randomUUID
       ? `peer-${crypto.randomUUID().slice(0, 8)}`
-      : `peer-${Math.random().toString(36).slice(2, 10)}`,
-  );
+      : `peer-${Math.random().toString(36).slice(2, 10)}`;
+  });
   const [displayName] = useState<string>(
     () => getSessionItem(STORAGE_KEY_NAME) ?? "",
   );

@@ -128,8 +128,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           applyThemePreference(anonProfile.theme);
           try {
             await supabase.from("profiles").upsert(anonProfile);
-          } catch {
-            /* table may not exist */
+          } catch (err) {
+            console.warn(
+              "Supabase 'profiles' table may not exist (migration not run). " +
+                "Anonymous settings will not persist.",
+              err,
+            );
           }
         }
         setLoading(false);
@@ -160,8 +164,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           applyThemePreference(newProfile.theme);
           try {
             await supabase.from("profiles").upsert(newProfile);
-          } catch {
-            /* table may not exist */
+          } catch (err) {
+            console.warn(
+              "Supabase 'profiles' table may not exist (migration not run). " +
+                "Settings will not persist.",
+              err,
+            );
           }
         }
       } catch (err) {
