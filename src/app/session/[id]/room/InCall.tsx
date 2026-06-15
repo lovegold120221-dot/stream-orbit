@@ -126,11 +126,13 @@ export default function InCall({
   useEffect(() => {
     if (!localParticipant || !room) return;
     const apply = () => {
+      console.log("[Orbit] Attempting to set attributes. Room state:", room.state, "Lang:", lang);
       if (room.state === ConnectionState.Connected) {
         // Serialize glossary as JSON string for the agent to read
         const glossaryStr = profile?.glossary?.length
           ? JSON.stringify(profile.glossary)
           : "";
+        console.log("[Orbit] Room connected. Setting attributes for", localParticipant.identity);
         localParticipant.setAttributes({
           [PARTICIPANT_LANG_ATTR]: lang,
           orbit_hand: handRaised ? "raised" : "",
@@ -138,6 +140,8 @@ export default function InCall({
           orbit_glossary: glossaryStr,
           orbit_content_type: contentType,
         });
+      } else {
+        console.log("[Orbit] Room not connected. Skipping setAttributes.");
       }
     };
     apply();

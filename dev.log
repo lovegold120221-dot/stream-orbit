@@ -135,3 +135,7 @@
 [web]  GET /api/token?room=a9ec719b-84b0-4298-a59d-f675a0d9c978&identity=peer-4a185237&name=gold%20love&host=true 200 in 3ms (next.js: 753µs, application-code: 2ms)
 [web] [browser] ⨯ unhandledRejection: SignalRequestError: Request to update local metadata timed out
 [web]     at Generator.next (<anonymous>)
+[web] ✓ Compiled in 136ms
+[web]   Reload env: .env.local
+[web]  GET /session/test-room/room 200 in 92ms (next.js: 33ms, application-code: 60ms)
+[web]  GET /session/test-room 200 in 47ms (next.js: 8ms, application-code: 39ms)
