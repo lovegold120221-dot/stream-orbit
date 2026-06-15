@@ -3326,6 +3326,79 @@ html[data-theme="dark"] .auth-logo-bg {
   font-weight: 600;
 }
 
+.schedule-time-picker {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.schedule-time-picker input[type="date"] {
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background-color: var(--bg-elevated);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  flex: 1;
+}
+
+.schedule-time-picker input[type="date"]:hover {
+  border-color: var(--accent);
+}
+
+.schedule-time-picker input[type="date"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.time-selects {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.time-selects select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 48px;
+  padding: 0 32px 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background-color: var(--bg-elevated);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238d96a6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.time-selects select:hover {
+  border-color: var(--accent);
+}
+
+.time-selects select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.time-separator {
+  font-weight: 700;
+  color: var(--fg-tertiary);
+  margin: 0 2px;
+}
+
 .schedule-link {
   min-height: 44px;
   display: flex;

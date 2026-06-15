@@ -37,6 +37,7 @@ export default function Home() {
   const [scheduleDate, setScheduleDate] = useState(new Date().toISOString().split("T")[0]);
   const [scheduleHour, setScheduleHour] = useState("12");
   const [scheduleMinute, setScheduleMinute] = useState("00");
+  const [schedulePeriod, setSchedulePeriod] = useState("PM");
   const [scheduledLink, setScheduledLink] = useState("");
   const [copied, setCopied] = useState(false);
   const [reminderToast, setReminderToast] = useState(false);
@@ -128,9 +129,14 @@ export default function Home() {
     const now = new Date();
     const future = new Date(now.getTime() + 30 * 60_000);
     
+    const h24 = future.getHours();
+    const period = h24 >= 12 ? "PM" : "AM";
+    const h12 = (h24 % 12) || 12;
+    
     setScheduleDate(future.toISOString().split("T")[0]);
-    setScheduleHour(future.getHours().toString().padStart(2, "0"));
+    setScheduleHour(h12.toString().padStart(2, "0"));
     setScheduleMinute(future.getMinutes().toString().padStart(2, "0"));
+    setSchedulePeriod(period);
     
     if (!scheduledLink) {
       setScheduledLink(`${window.location.origin}/session/${crypto.randomUUID()}`);
@@ -145,7 +151,13 @@ export default function Home() {
   }
 
   // Derived value for existing logic that expects a datetime-local string
-  const scheduleTime = `${scheduleDate}T${scheduleHour}:${scheduleMinute}`;
+  const scheduleTime = (() => {
+    let h = parseInt(scheduleHour, 10);
+    if (schedulePeriod === "PM" && h < 12) h += 12;
+    if (schedulePeriod === "AM" && h === 12) h = 0;
+    const h24 = h.toString().padStart(2, "0");
+    return `${scheduleDate}T${h24}:${scheduleMinute}`;
+  })();
 
   async function saveAndRemind() {
     if (!scheduledLink || !scheduleDate || !scheduleHour || !scheduleMinute) return;
@@ -321,29 +333,39 @@ export default function Home() {
                        value={scheduleDate}
                        onChange={(event) => setScheduleDate(event.target.value)}
                      />
-                     <div className="time-selects">
-                       <select
-                         value={scheduleHour}
-                         onChange={(event) => setScheduleHour(event.target.value)}
-                       >
-                         {Array.from({ length: 24 }, (_, i) => (
-                           <option key={i} value={i.toString().padStart(2, "0")}>
-                             {i.toString().padStart(2, "0")}
-                           </option>
-                         ))}
-                       </select>
-                       <span className="time-separator">:</span>
-                       <select
-                         value={scheduleMinute}
-                         onChange={(event) => setScheduleMinute(event.target.value)}
-                       >
-                         {Array.from({ length: 60 }, (_, i) => (
-                           <option key={i} value={i.toString().padStart(2, "0")}>
-                             {i.toString().padStart(2, "0")}
-                           </option>
-                         ))}
-                       </select>
-                     </div>
+                      <div className="time-selects">
+                        <select
+                          value={scheduleHour}
+                          onChange={(event) => setScheduleHour(event.target.value)}
+                        >
+                          {Array.from({ length: 12 }, (_, i) => {
+                            const hour = i + 1;
+                            return (
+                              <option key={hour} value={hour.toString().padStart(2, "0")}>
+                                {hour.toString().padStart(2, "0")}
+                              </option>
+                            );
+                          })}
+                        </select>
+                        <span className="time-separator">:</span>
+                        <select
+                          value={scheduleMinute}
+                          onChange={(event) => setScheduleMinute(event.target.value)}
+                        >
+                          {Array.from({ length: 60 }, (_, i) => (
+                            <option key={i} value={i.toString().padStart(2, "0")}>
+                              {i.toString().padStart(2, "0")}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={schedulePeriod}
+                          onChange={(event) => setSchedulePeriod(event.target.value)}
+                        >
+                          <option value="AM">AM</option>
+                          <option value="PM">PM</option>
+                        </select>
+                      </div>
                    </div>
                  </label>
 
