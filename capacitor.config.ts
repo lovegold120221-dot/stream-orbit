@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 // Override with CAP_SERVER_URL=http://localhost:3000 for local dev
-const PROD_URL = "https://orbit.eburon.ai";
+const PROD_URL = "https://meeting.eburon.ai";
 const serverUrl = process.env.CAP_SERVER_URL || PROD_URL;
 const isLocal = serverUrl.includes("localhost") || serverUrl.includes("127.0.0.1");
 
@@ -34,9 +34,9 @@ const config: CapacitorConfig = {
     },
   },
   ios: {
-    // Universal links: https://orbit.eburon.ai/session/*
+    // Universal links: https://meeting.eburon.ai/session/*
     // Configure associated domain in Xcode: Signing & Capabilities → Associated Domains
-    // Add: applinks:orbit.eburon.ai
+    // Add: applinks:meeting.eburon.ai
     scheme: "orbit",
   },
 };

@@ -5,7 +5,7 @@ Speak your language. Hear theirs. Translation spins up on demand — same-langua
 
 Proudly built by [Eburon AI](https://eburon.ai) — founded by Joe Lernout.
 
-🌐 **Live at [orbit.eburon.ai](https://orbit.eburon.ai/)**
+🌐 **Live at [meeting.eburon.ai](https://meeting.eburon.ai/)**
 
 ![architecture](https://img.shields.io/badge/architecture-peer--call-1A1917) ![agent](https://img.shields.io/badge/agent-python-3776AB) ![web](https://img.shields.io/badge/web-nextjs-000000) ![pwa](https://img.shields.io/badge/pwa-ready-8B5CF6) ![android](https://img.shields.io/badge/android-capacitor-34D058)
 

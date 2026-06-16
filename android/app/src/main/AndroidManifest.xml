@@ -30,12 +30,12 @@
                 <data android:scheme="orbit" android:host="session" />
             </intent-filter>
 
-            <!-- Universal links: https://orbit.eburon.ai/session/* -->
+            <!-- Universal links: https://meeting.eburon.ai/session/* -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="orbit.eburon.ai" android:pathPrefix="/session/" />
+                <data android:scheme="https" android:host="meeting.eburon.ai" android:pathPrefix="/session/" />
             </intent-filter>
 
         </activity>

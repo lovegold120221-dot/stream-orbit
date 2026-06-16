@@ -80,7 +80,7 @@ graph TD
 
 * **The Idea**: Support clicking meeting links on WhatsApp or calendar entries to open the native app directly instead of the browser.
 * **Why it matters**: Copying and pasting room URLs is a tedious friction point for mobile users.
-* **Implementation**: Configure universal links (`https://orbit.eburon.ai/session/*`) and custom schema links (`orbit://session/*`) in the iOS `Entitlements` and Android `AndroidManifest.xml` files. When clicked, Capacitor handles the route and launches the call immediately.
+* **Implementation**: Configure universal links (`https://meeting.eburon.ai/session/*`) and custom schema links (`orbit://session/*`) in the iOS `Entitlements` and Android `AndroidManifest.xml` files. When clicked, Capacitor handles the route and launches the call immediately.
 
 ### 10. Hardware-Accelerated Responsive Gallery Grid
 
