@@ -140,3 +140,11 @@
 [web]  GET /session/test-room/room 200 in 92ms (next.js: 33ms, application-code: 60ms)
 [web]  GET /session/test-room 200 in 47ms (next.js: 8ms, application-code: 39ms)
 [web] pnpm run dev:web exited with code 0
+[agent]     04:37:08.223 INFO     livekit.agents     shutting down worker  
+[agent]                                          {"id": "AW_nta3zqN83sdf"}
+[agent]     04:37:08.221 WARNING  watchfiles.main    received signal 15, raising        
+[agent]                                              KeyboardInterrupt                  
+[agent]     04:37:08.272 WARNING  livekit.agents     exiting forcefully  
+[agent]  ELIFECYCLE  Command failed.
+[agent] pnpm run dev:agent exited with code SIGTERM
+ ELIFECYCLE  Command failed with exit code 1.
