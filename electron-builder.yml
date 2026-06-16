@@ -27,6 +27,16 @@ asarUnpack:
   - "**/*.node"
   - ".next/server/**"
 
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+  artifactName: "${productName}-${version}-mac-${arch}.${ext}"
+  icon: electron/assets/icon.icns
+  category: public.app-category.business
+
 # macOS config is passed via CLI args in CI (--config.mac.*) to avoid
 # cross-platform schema validation errors on Linux/Windows with
 # electron-builder 26. See .github/workflows/signed-release.yml.
