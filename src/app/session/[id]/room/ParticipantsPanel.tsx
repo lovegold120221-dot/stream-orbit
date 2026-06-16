@@ -2,10 +2,14 @@
 
 import { useMemo, useState } from "react";
 import {
-  useLocalParticipant,
-} from "@livekit/components-react";
-import { Track, type LocalParticipant, type RemoteParticipant } from "livekit-client";
-import { PARTICIPANT_LANG_ATTR } from "@/lib/config";
+  useCall,
+  useCallStateHooks,
+  hasAudio,
+  hasVideo,
+  hasScreenShare,
+  type StreamVideoParticipant,
+} from "@stream-io/video-react-sdk";
+import { PARTICIPANT_LANG_ATTR, type ParticipantCustomData } from "@/lib/config";
 import { getLanguageByCode } from "@/lib/languages";
 import {
   MicOnIcon,
@@ -42,8 +46,8 @@ export default function ParticipantsPanel({
   onToggleChat,
   reactions,
 }: {
-  localParticipant: LocalParticipant | undefined;
-  participants: RemoteParticipant[];
+  localParticipant: StreamVideoParticipant | undefined | null;
+  participants: StreamVideoParticipant[];
   myLang: string;
   isHost: boolean;
   roomName: string;
@@ -51,31 +55,24 @@ export default function ParticipantsPanel({
   onToggleChat: () => void;
   reactions: Map<string, { emoji: string; ts: number }>;
 }) {
-  const { microphoneTrack, cameraTrack } = useLocalParticipant();
+  const call = useCall();
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const micOn = !!microphoneTrack && !microphoneTrack.isMuted;
-  const camOn = !!cameraTrack && cameraTrack.source === Track.Source.Camera && !cameraTrack.isMuted;
-  const handRaised = localParticipant?.attributes?.orbit_hand === "raised";
+  const micOn = localParticipant ? hasAudio(localParticipant) : false;
+  const camOn = localParticipant ? hasVideo(localParticipant) : false;
 
   const rows = useMemo(() => {
     return participants.map((p) => ({
-      identity: p.identity,
-      name: p.name || p.identity,
-      initial: (p.name || p.identity).slice(0, 1).toUpperCase(),
-      lang: (p.attributes || {})[PARTICIPANT_LANG_ATTR],
-      micOn: Array.from(p.audioTrackPublications.values()).some(
-        (pub) => pub.source === Track.Source.Microphone && !pub.isMuted
-      ),
-      camOn: Array.from(p.videoTrackPublications.values()).some(
-        (pub) => pub.source === Track.Source.Camera && !pub.isMuted
-      ),
-      handRaised: (p.attributes || {}).orbit_hand === "raised",
-      screenSharing: Array.from(p.trackPublications.values()).some(
-        (pub) => pub.source === Track.Source.ScreenShare && !pub.isMuted
-      ),
+      identity: p.userId,
+      name: p.name || p.userId,
+      initial: (p.name || p.userId).slice(0, 1).toUpperCase(),
+      lang: (p.custom as ParticipantCustomData)?.lang,
+      micOn: hasAudio(p),
+      camOn: hasVideo(p),
+      handRaised: (p.custom as ParticipantCustomData)?.orbit_hand === "raised",
+      screenSharing: hasScreenShare(p),
       participant: p,
     }));
   }, [participants]);
@@ -83,9 +80,7 @@ export default function ParticipantsPanel({
   const speakingSet = useMemo(() => {
     const s = new Set<string>();
     for (const p of participants) {
-      if (Array.from(p.audioTrackPublications.values()).some(
-        (pub) => pub.source === Track.Source.Microphone && !pub.isMuted && pub.track
-      )) s.add(p.identity);
+      if (hasAudio(p)) s.add(p.userId);
     }
     return s;
   }, [participants]);
@@ -149,14 +144,22 @@ export default function ParticipantsPanel({
 
       <div className="sidebar-body">
         <SelfRow
-          name={localParticipant?.name || localParticipant?.identity || "You"}
-          initial={(localParticipant?.name || localParticipant?.identity || "Y").slice(0, 1).toUpperCase()}
+          name={localParticipant?.name || localParticipant?.userId || "You"}
+          initial={(localParticipant?.name || localParticipant?.userId || "Y").slice(0, 1).toUpperCase()}
           micOn={micOn}
           camOn={camOn}
           isHost={isHost}
           onToggleChat={onToggleChat}
-          onToggleMic={() => localParticipant?.setMicrophoneEnabled(!micOn)}
-          onToggleCam={() => localParticipant?.setCameraEnabled(!camOn)}
+          onToggleMic={() => {
+            if (!call) return;
+            if (micOn) call.microphone.disable().catch(() => {});
+            else call.microphone.enable().catch(() => {});
+          }}
+          onToggleCam={() => {
+            if (!call) return;
+            if (camOn) call.camera.disable().catch(() => {});
+            else call.camera.enable().catch(() => {});
+          }}
         />
 
         {sorted.length === 0 && (
@@ -245,7 +248,7 @@ function ParticipantRow({
 }: {
   identity: string; name: string; initial: string; lang?: string;
   micOn: boolean; camOn: boolean; handRaised: boolean; screenSharing: boolean;
-  participant: RemoteParticipant; isHost: boolean; roomName: string;
+  participant: StreamVideoParticipant; isHost: boolean; roomName: string;
   expanded: boolean; onToggle: () => void; myLang: string; isSpeaking: boolean;
   reaction?: { emoji: string; ts: number };
 }) {
@@ -274,7 +277,7 @@ function ParticipantRow({
         <div className="pp-row-info">
           <div className="pp-row-name-row">
             <span className="pp-name">{name}</span>
-            {participant.attributes?.orbit_host === "true" && <span className="pp-badge pp-badge--role">Host</span>}
+            {(participant.custom as ParticipantCustomData)?.orbit_host === "true" && <span className="pp-badge pp-badge--role">Host</span>}
             {langInfo && (
               <span className="pp-badge pp-badge--lang">
                 {langInfo.flag} {needsTranslation ? `→ ${myLang.toUpperCase()}` : langInfo.code.toUpperCase()}

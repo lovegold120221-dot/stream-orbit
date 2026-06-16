@@ -1,127 +1,148 @@
 import { NextRequest, NextResponse } from "next/server";
-import { RoomServiceClient, AccessToken, RoomConfiguration, RoomAgentDispatch } from "livekit-server-sdk";
-
-// Must match agent_name in agent.py
-const TRANSLATOR_AGENT_NAME = "gemini-translator";
+import { StreamClient } from "@stream-io/node-sdk";
 
 export async function POST(req: NextRequest) {
   try {
-    const { action, originalRoom, assignments, breakoutRooms } = await req.json();
+    const body = await req.json();
+    const { roomName, numRooms, assignments } = body;
 
-    const apiKey = process.env.LIVEKIT_API_KEY;
-    const apiSecret = process.env.LIVEKIT_API_SECRET;
-    const serverUrl = process.env.LIVEKIT_URL;
+    const apiKey = process.env.STREAM_API_KEY;
+    const apiSecret = process.env.STREAM_SECRET_KEY;
 
-    if (!apiKey || !apiSecret || !serverUrl) {
-      return NextResponse.json({ error: "LiveKit credentials not configured" }, { status: 500 });
+    if (!apiKey || !apiSecret) {
+      return NextResponse.json({ error: "Stream credentials not configured" }, { status: 500 });
     }
 
-    const roomService = new RoomServiceClient(serverUrl, apiKey, apiSecret);
+    const client = new StreamClient(apiKey, apiSecret);
 
-    if (action === "start") {
-      if (!assignments || !originalRoom) {
-        return NextResponse.json({ error: "Missing assignments or originalRoom" }, { status: 400 });
-      }
-
-      const createdRooms = new Set<string>();
-
-      for (const assignment of assignments) {
-        const { identity, displayName = identity, newRoom } = assignment;
-        if (!identity || !newRoom) continue;
-
-        // Create the breakout room if it hasn't been created yet
-        if (!createdRooms.has(newRoom)) {
+    if (!assignments || !roomName) {
+      // Ending breakout rooms: receive action="stop" with breakoutRooms
+      const { breakoutRooms, originalRoom } = body;
+      if (breakoutRooms && Array.isArray(breakoutRooms)) {
+        // End each breakout room by sending a custom event and deleting the room
+        for (const bRoom of breakoutRooms) {
           try {
-            await roomService.createRoom({
-              name: newRoom,
-              emptyTimeout: 300,
-              maxParticipants: 8,
-            });
-            createdRooms.add(newRoom);
-          } catch (e: any) {
-            if (!e.message?.includes("already exists")) {
-              console.warn(`Failed to create breakout room ${newRoom}:`, e);
-            }
+            const token = client.createToken("admin-bot");
+            // Notify participants via custom event
+            await fetch(
+              `https://video.stream-io-api.com/api/v2/calls/default/${bRoom}/custom?api_key=${apiKey}`,
+              {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${token}`,
+                  "stream-auth-type": "jwt",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  type: "BREAKOUT_END",
+                  originalRoom: originalRoom || roomName,
+                }),
+              }
+            );
+          } catch (e) {
+            console.warn(`Failed to end breakout room ${bRoom}:`, e);
+          }
+
+          // End the call
+          try {
+            const token = client.createToken("admin-bot");
+            await fetch(
+              `https://video.stream-io-api.com/api/v2/calls/default/${bRoom}?api_key=${apiKey}`,
+              {
+                method: "PATCH",
+                headers: {
+                  "Authorization": `Bearer ${token}`,
+                  "stream-auth-type": "jwt",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  ended_at: new Date().toISOString(),
+                }),
+              }
+            );
+          } catch (e) {
+            console.warn(`Failed to delete breakout room ${bRoom}:`, e);
           }
         }
-
-        // Generate a token for this participant to join the breakout room
-        const at = new AccessToken(apiKey, apiSecret, {
-          identity: `${identity}-breakout`,
-          name: displayName,
-          ttl: 4 * 60 * 60,
-        });
-        at.addGrant({
-          roomJoin: true,
-          room: newRoom,
-          canPublish: true,
-          canPublishData: true,
-          canSubscribe: true,
-          canUpdateOwnMetadata: true,
-        });
-        // Dispatch the translator agent to the breakout room too
-        at.roomConfig = new RoomConfiguration({
-          agents: [
-            new RoomAgentDispatch({
-              agentName: TRANSLATOR_AGENT_NAME,
-              metadata: JSON.stringify({ sessionId: newRoom }),
-            }),
-          ],
-          emptyTimeout: 300,
-          maxParticipants: 8,
-        });
-        const token = await at.toJwt();
-
-        // Send the join instruction + token to the participant via data message
-        const payload = JSON.stringify({
-          type: "BREAKOUT_JOIN",
-          newRoom,
-          originalRoom,
-          token,
-          serverUrl,
-          breakoutIdentity: `${identity}-breakout`,
-        });
-        const data = new TextEncoder().encode(payload);
-        await roomService.sendData(originalRoom, data, 1, {
-          destinationIdentities: [identity],
-          topic: "breakout",
-        });
+        return NextResponse.json({ success: true, endedRooms: breakoutRooms });
       }
-
-      return NextResponse.json({ success: true, createdRooms: Array.from(createdRooms) });
-    } else if (action === "stop") {
-      if (!breakoutRooms || !Array.isArray(breakoutRooms)) {
-        return NextResponse.json({ error: "Missing breakoutRooms array" }, { status: 400 });
-      }
-
-      // Notify all breakout rooms to end
-      for (const bRoom of breakoutRooms) {
-        try {
-          const payload = JSON.stringify({ type: "BREAKOUT_END", originalRoom });
-          const data = new TextEncoder().encode(payload);
-          await roomService.sendData(bRoom, data, 1, { topic: "breakout" });
-        } catch (e) {
-          console.warn(`Failed to broadcast to breakout room ${bRoom}:`, e);
-        }
-
-        // Delete the breakout room
-        try {
-          await roomService.deleteRoom(bRoom);
-        } catch (e) {
-          console.warn(`Failed to delete breakout room ${bRoom}:`, e);
-        }
-      }
-
-      return NextResponse.json({ success: true, endedRooms: breakoutRooms });
-    } else {
-      return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+      return NextResponse.json({ error: "Missing assignments or breakoutRooms" }, { status: 400 });
     }
+
+    // Start breakout rooms
+    const createdRooms: string[] = [];
+
+    for (const assignment of assignments) {
+      const { identity, displayName = identity, newRoom } = assignment;
+      if (!identity || !newRoom) continue;
+
+      if (!createdRooms.includes(newRoom)) {
+        // Create the breakout room via Stream API
+        try {
+          const token = client.createToken("admin-bot");
+          const res = await fetch(
+            `https://video.stream-io-api.com/api/v2/calls/default/${newRoom}?api_key=${apiKey}`,
+            {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${token}`,
+                "stream-auth-type": "jwt",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                created_by_id: "admin-bot",
+                custom: {
+                  is_breakout: true,
+                  original_room: roomName,
+                },
+              }),
+            }
+          );
+          if (!res.ok) {
+            console.warn(`Failed to create breakout room ${newRoom}: ${res.status}`);
+          } else {
+            createdRooms.push(newRoom);
+          }
+        } catch (e) {
+          console.warn(`Failed to create breakout room ${newRoom}:`, e);
+        }
+      }
+
+      // Generate token for the breakout participant
+      const breakoutIdentity = `${identity}-breakout`;
+      const breakoutToken = client.createToken(breakoutIdentity);
+
+      // Send the join instruction via custom event to the participant
+      try {
+        const token = client.createToken("admin-bot");
+        await fetch(
+          `https://video.stream-io-api.com/api/v2/calls/default/${roomName}/custom?api_key=${apiKey}`,
+          {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "stream-auth-type": "jwt",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              type: "BREAKOUT_JOIN",
+              newRoom,
+              originalRoom: roomName,
+              token: breakoutToken,
+              serverUrl: "",
+              breakoutIdentity,
+            }),
+          }
+        );
+      } catch (e) {
+        console.warn(`Failed to send breakout join event:`, e);
+      }
+    }
+
+    return NextResponse.json({ success: true, rooms: createdRooms });
   } catch (error) {
     console.error("Breakout API Error:", error);
     const message = error instanceof Error ? error.message : "Failed to process breakout request.";
-    return NextResponse.json(
-      { error: message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

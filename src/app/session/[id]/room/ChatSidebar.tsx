@@ -2,10 +2,9 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import {
-  useLocalParticipant,
-  useRoomContext,
-  useDataChannel,
-} from "@livekit/components-react";
+  useCall,
+  useCallStateHooks,
+} from "@stream-io/video-react-sdk";
 import { supabase } from "@/lib/supabase";
 import { useUser } from "@/context/UserContext";
 import { AttachmentIcon } from "./icons";
@@ -21,22 +20,15 @@ type ChatMessage = {
   fromId: string;
   message: string;
   timestamp: number;
-  /** Public URL to the uploaded file (Supabase Storage) */
   attachmentUrl?: string;
-  /** Original file name */
   attachmentName?: string;
-  /** MIME type */
   attachmentType?: string;
-  /** File size in bytes */
   attachmentSize?: number;
 };
 
-/** While a file is uploading (or ready to send) we track it here */
 type PendingAttachment = {
   file: File;
-  /** 0 – 100 */
   progress: number;
-  /** Set once upload completes */
   url?: string;
   name?: string;
   type?: string;
@@ -47,7 +39,7 @@ type PendingAttachment = {
 // Constants
 // ---------------------------------------------------------------------------
 
-const CHAT_TOPIC = "orbit_chat";
+const CHAT_EVENT_TYPE = "orbit_chat";
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const STORAGE_BUCKET = "chat-files";
 
@@ -68,7 +60,6 @@ function formatTimestamp(ts: number): string {
   });
 }
 
-/** Derive a unique storage path inside the bucket */
 function storagePath(roomName: string, file: File): string {
   const safeName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
   return `${roomName}/${safeName}`;
@@ -85,8 +76,9 @@ export default function ChatSidebar({
   onClose: () => void;
   privateTo?: string;
 }) {
-  const { localParticipant } = useLocalParticipant();
-  const room = useRoomContext();
+  const call = useCall();
+  const { useLocalParticipant } = useCallStateHooks();
+  const localParticipant = useLocalParticipant();
   const { profile } = useUser();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -101,6 +93,8 @@ export default function ChatSidebar({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const seenIds = useRef(new Set<string>());
 
+  const roomName = call?.id ?? "";
+
   // -----------------------------------------------------------------------
   // Load chat history from Supabase on mount
   // -----------------------------------------------------------------------
@@ -110,7 +104,7 @@ export default function ChatSidebar({
       const { data, error } = await supabase
         .from("chat_messages")
         .select("*")
-        .eq("meeting_id", room.name)
+        .eq("meeting_id", roomName)
         .order("created_at", { ascending: true });
 
       if (cancelled) return;
@@ -153,18 +147,18 @@ export default function ChatSidebar({
     return () => {
       cancelled = true;
     };
-  }, [room.name]);
+  }, [roomName]);
 
   // -----------------------------------------------------------------------
-  // Listen for incoming real-time chat messages
+  // Listen for incoming real-time chat messages via Stream custom events
   // -----------------------------------------------------------------------
-  useDataChannel(
-    CHAT_TOPIC,
-    useCallback((msg: { payload: Uint8Array }) => {
+  useEffect(() => {
+    if (!call) return;
+    const handler = (event: any) => {
       try {
-        const payload = JSON.parse(
-          new TextDecoder().decode(msg.payload),
-        ) as ChatMessage;
+        const data = event.custom;
+        if (!data || data.type !== CHAT_EVENT_TYPE) return;
+        const payload = data as ChatMessage & { type: string };
         if (!seenIds.current.has(payload.id)) {
           seenIds.current.add(payload.id);
           setMessages((prev) => [...prev, payload]);
@@ -172,8 +166,10 @@ export default function ChatSidebar({
       } catch {
         /* ignore malformed messages */
       }
-    }, []),
-  );
+    };
+    call.on("custom", handler);
+    return () => call.off("custom", handler);
+  }, [call]);
 
   // -----------------------------------------------------------------------
   // Auto-scroll
@@ -188,11 +184,9 @@ export default function ChatSidebar({
   // -----------------------------------------------------------------------
   const uploadFile = useCallback(
     async (file: File) => {
-      const path = storagePath(room.name, file);
+      const path = storagePath(roomName, file);
       setPendingAttachment({ file, progress: 0 });
 
-      // Simulate progress — Supabase JS SDK doesn't expose upload progress
-      // so we nudge it in stages.
       const progressInterval = setInterval(() => {
         setPendingAttachment((prev) => {
           if (!prev || prev.progress >= 90) return prev;
@@ -217,12 +211,10 @@ export default function ChatSidebar({
           return;
         }
 
-        // Get public URL
         const { data: publicUrlData } = supabase.storage
           .from(STORAGE_BUCKET)
           .getPublicUrl(path);
 
-        // Store upload result directly in state (no need for a ref)
         setPendingAttachment({
           file,
           progress: 100,
@@ -238,7 +230,7 @@ export default function ChatSidebar({
         setPendingAttachment(null);
       }
     },
-    [room.name],
+    [roomName],
   );
 
   // -----------------------------------------------------------------------
@@ -249,35 +241,32 @@ export default function ChatSidebar({
       const file = e.target.files?.[0];
       if (!file) return;
 
-      // Reset file input so re-picking the same file still fires onChange
       e.target.value = "";
 
-      // Validate size
       if (file.size > MAX_FILE_SIZE) {
         setUploadError(`File too large (max ${formatFileSize(MAX_FILE_SIZE)})`);
         return;
       }
 
       setUploadError(null);
-      // Start uploading immediately
       uploadFile(file);
     },
     [uploadFile],
   );
 
   // -----------------------------------------------------------------------
-  // Send
+  // Send message via Stream custom event
   // -----------------------------------------------------------------------
-  const sendMessage = () => {
-    if (!localParticipant) return;
+  const sendMessage = async () => {
+    if (!localParticipant || !call) return;
     const hasText = text.trim().length > 0;
     const attachReady =
       pendingAttachment?.progress === 100 && pendingAttachment.url;
     if (!hasText && !attachReady) return;
 
     const senderName =
-      localParticipant.name || localParticipant.identity || "Unknown";
-    const senderId = profile?.id || localParticipant.identity || "unknown";
+      localParticipant.name || localParticipant.userId || "Unknown";
+    const senderId = profile?.id || localParticipant.userId || "unknown";
 
     const msg: ChatMessage = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -291,12 +280,15 @@ export default function ChatSidebar({
       attachmentSize: pendingAttachment?.size,
     };
 
-    // 1. Broadcast via LiveKit data channel
-    const encoder = new TextEncoder();
-    localParticipant.publishData(encoder.encode(JSON.stringify(msg)), {
-      topic: CHAT_TOPIC,
-      reliable: true,
-    });
+    // 1. Broadcast via Stream custom event
+    try {
+      await call.sendCustomEvent({
+        type: CHAT_EVENT_TYPE,
+        ...msg,
+      });
+    } catch (err) {
+      console.warn("Failed to send chat via custom event:", err);
+    }
 
     // 2. Add to local state immediately
     seenIds.current.add(msg.id);
@@ -307,12 +299,12 @@ export default function ChatSidebar({
     setPendingAttachment(null);
     setUploadError(null);
 
-    // 4. Persist to Supabase (let DB auto-generate id — our client-side id is not a valid UUID)
+    // 4. Persist to Supabase
     setSaveError(null);
     supabase
       .from("chat_messages")
       .insert({
-        meeting_id: room.name,
+        meeting_id: roomName,
         user_id: senderId,
         sender_name: senderName,
         message: msg.message || "",

@@ -1,20 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  AccessToken,
-  RoomConfiguration,
-  RoomAgentDispatch,
-} from "livekit-server-sdk";
+import { StreamClient } from "@stream-io/node-sdk";
+import { STREAM_CALL_TYPE } from "@/lib/config";
 
 // Session caps (mirrors src/lib/config.ts on the client). Hardcoded here to
 // avoid a runtime import cycle; keep these in sync if you change them in one place.
-const SESSION_TTL_SECONDS = 4 * 60 * 60; // 4h hard cap per grill Q21
-const EMPTY_ROOM_TIMEOUT = 60; // close empty rooms after 60s
-const DEPARTURE_TIMEOUT = 30; // close after last person leaves
-const MAX_PARTICIPANTS = 40; // room cap — supports up to 40 participants
-// Must match agent_name in translator/src/agent.py. Using "gemini-translator"
-// instead of the generic "translator" to avoid colliding with stale Cloud
-// Agents that may already be registered under "translator".
-const TRANSLATOR_AGENT_NAME = "gemini-translator";
+const SESSION_TTL_SECONDS = 4 * 60 * 60; // 4h hard cap
+const MAX_PARTICIPANTS = 40;
 
 export async function GET(req: NextRequest) {
   const room = req.nextUrl.searchParams.get("room");
@@ -31,52 +22,60 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const apiKey = process.env.LIVEKIT_API_KEY;
-  const apiSecret = process.env.LIVEKIT_API_SECRET;
-  const serverUrl = process.env.LIVEKIT_URL;
+  const apiKey = process.env.STREAM_API_KEY;
+  const apiSecret = process.env.STREAM_SECRET_KEY;
 
-  if (!apiKey || !apiSecret || !serverUrl) {
+  if (!apiKey || !apiSecret) {
     return NextResponse.json(
-      { error: "LiveKit credentials not configured" },
+      { error: "Stream credentials not configured" },
       { status: 500 },
     );
   }
 
-  const at = new AccessToken(apiKey, apiSecret, {
+  // Create a Stream client for server-side token generation.
+  const client = new StreamClient(apiKey, apiSecret);
+
+  // Generate a user token. The role determines permissions in the call.
+  // Admins get moderator capabilities; regular users get member.
+  const role = isHost ? "admin" : "user";
+  const token = client.createToken(
     identity,
-    name: displayName,
-    ttl: SESSION_TTL_SECONDS,
-  });
+    Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
+  );
 
-  // Peer model (grill Q7): every participant can publish audio + video and
-  // subscribe; can update their own attributes (used to broadcast their
-  // chosen language to the agent + other peers).
-  at.addGrant({
-    roomJoin: true,
-    room,
-    canPublish: true,
-    canPublishData: true,
-    canSubscribe: true,
-    canUpdateOwnMetadata: true,
-    roomAdmin: isHost,
-  });
-
-  // Dispatch the Python translator agent when the room is created (grill Q9).
-  // RoomConfiguration is only applied on first creation; subsequent token
-  // mints for an existing room are ignored by LiveKit. So idempotent.
-  at.roomConfig = new RoomConfiguration({
-    agents: [
-      new RoomAgentDispatch({
-        agentName: TRANSLATOR_AGENT_NAME,
-        metadata: JSON.stringify({ sessionId: room }),
+  // Upsert the user with metadata so display name + custom data are available
+  // to all participants. Idempotent — upserting the same user is a no-op.
+  try {
+    await fetch(`https://video.stream-io-api.com/api/v2/users?api_key=${apiKey}`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "stream-auth-type": "jwt",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        users: {
+          [identity]: {
+            id: identity,
+            role: role,
+            name: displayName,
+            custom: {
+              lang: "", // will be set when participant chooses language
+              host: isHost ? "true" : "",
+            },
+          },
+        },
       }),
-    ],
-    emptyTimeout: EMPTY_ROOM_TIMEOUT,
-    departureTimeout: DEPARTURE_TIMEOUT,
-    maxParticipants: MAX_PARTICIPANTS,
+    });
+  } catch {
+    // Non-fatal: user might already exist or network issue; token is still valid.
+    console.warn("[token] Could not upsert user on Stream — continuing with token only.");
+  }
+
+  return NextResponse.json({
+    token,
+    apiKey,
+    callType: STREAM_CALL_TYPE,
+    callId: room,
   });
-
-  const token = await at.toJwt();
-
-  return NextResponse.json({ token, serverUrl });
 }

@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  useIsSpeaking,
-  useParticipantAttributes,
-} from "@livekit/components-react";
-import { Track, type Participant } from "livekit-client";
-import { PARTICIPANT_LANG_ATTR } from "@/lib/config";
+  useCallStateHooks,
+  hasVideo,
+  type StreamVideoParticipant,
+} from "@stream-io/video-react-sdk";
+import { PARTICIPANT_LANG_ATTR, type ParticipantCustomData } from "@/lib/config";
 import { getLanguageByCode } from "@/lib/languages";
 
 /**
@@ -17,7 +17,7 @@ export default function ActiveSpeaker({
   participant,
   myLang,
 }: {
-  participant: Participant | null;
+  participant: StreamVideoParticipant | null;
   myLang: string;
 }) {
   if (!participant) {
@@ -39,60 +39,34 @@ function ActiveSpeakerInner({
   participant,
   myLang,
 }: {
-  participant: Participant;
+  participant: StreamVideoParticipant;
   myLang: string;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [cameraOn, setCameraOn] = useState(false);
-  const isSpeaking = useIsSpeaking(participant);
-  const { attributes } = useParticipantAttributes({ participant });
+  const cameraOn = hasVideo(participant);
+  const isSpeaking = participant.isSpeaking ?? false;
 
-  const speakerLang = attributes?.[PARTICIPANT_LANG_ATTR];
+  const speakerLang = (participant.custom as ParticipantCustomData)?.lang;
   const langInfo = speakerLang ? getLanguageByCode(speakerLang) : undefined;
   const needsTranslation = !!speakerLang && speakerLang !== myLang;
 
-  const displayName = participant.name || participant.identity;
+  const displayName = participant.name || participant.userId;
   const initial = displayName.slice(0, 1).toUpperCase();
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const sync = () => {
-      let cam = false;
-      for (const pub of participant.videoTrackPublications.values()) {
-        if (pub.source === Track.Source.Camera && pub.track && !pub.isMuted) {
-          pub.track.attach(video);
-          cam = true;
-        }
-      }
-      if (!cam) video.srcObject = null;
-      setCameraOn(cam);
-    };
+    if (cameraOn && participant.videoStream) {
+      video.srcObject = participant.videoStream;
+    } else {
+      video.srcObject = null;
+    }
 
-    sync();
-    participant.on("trackSubscribed", sync);
-    participant.on("trackUnsubscribed", sync);
-    participant.on("trackPublished", sync);
-    participant.on("trackUnpublished", sync);
-    participant.on("localTrackPublished", sync);
-    participant.on("localTrackUnpublished", sync);
-    participant.on("trackMuted", sync);
-    participant.on("trackUnmuted", sync);
     return () => {
-      participant.off("trackSubscribed", sync);
-      participant.off("trackUnsubscribed", sync);
-      participant.off("trackPublished", sync);
-      participant.off("trackUnpublished", sync);
-      participant.off("localTrackPublished", sync);
-      participant.off("localTrackUnpublished", sync);
-      participant.off("trackMuted", sync);
-      participant.off("trackUnmuted", sync);
-      for (const pub of participant.videoTrackPublications.values()) {
-        if (pub.track) pub.track.detach(video);
-      }
+      video.srcObject = null;
     };
-  }, [participant]);
+  }, [participant.videoStream, cameraOn]);
 
   return (
     <div className={`active-speaker-wrap${isSpeaking ? " active-speaker-speaking" : ""}`}>

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { RoomServiceClient } from "livekit-server-sdk";
+import { StreamClient } from "@stream-io/node-sdk";
 
 export async function POST(req: NextRequest) {
   try {
-    const { action, roomName, identity, trackSid } = await req.json();
+    const { action, roomName, identity } = await req.json();
 
     if (!action || !roomName || !identity) {
       return NextResponse.json(
@@ -12,31 +12,75 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const apiKey = process.env.LIVEKIT_API_KEY;
-    const apiSecret = process.env.LIVEKIT_API_SECRET;
-    const serverUrl = process.env.LIVEKIT_URL;
+    const apiKey = process.env.STREAM_API_KEY;
+    const apiSecret = process.env.STREAM_SECRET_KEY;
 
-    if (!apiKey || !apiSecret || !serverUrl) {
+    if (!apiKey || !apiSecret) {
       return NextResponse.json(
-        { error: "LiveKit credentials not configured" },
+        { error: "Stream credentials not configured" },
         { status: 500 }
       );
     }
 
-    const roomService = new RoomServiceClient(serverUrl, apiKey, apiSecret);
+    const client = new StreamClient(apiKey, apiSecret);
 
     if (action === "kick") {
-      await roomService.removeParticipant(roomName, identity);
-      return NextResponse.json({ success: true, action: "kick" });
-    } else if (action === "mute") {
-      if (!trackSid) {
+      try {
+        // Block the user from the call
+        const token = client.createToken("admin-bot");
+        await fetch(
+          `https://video.stream-io-api.com/api/v2/calls/default/${roomName}/block?api_key=${apiKey}`,
+          {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "stream-auth-type": "jwt",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              user_id: identity,
+            }),
+          }
+        );
+        return NextResponse.json({ success: true, action: "kick" });
+      } catch (err: any) {
         return NextResponse.json(
-          { error: "Missing trackSid for mute action" },
-          { status: 400 }
+          { error: err.message || "Failed to kick participant" },
+          { status: 500 }
         );
       }
-      await roomService.mutePublishedTrack(roomName, identity, trackSid, true);
-      return NextResponse.json({ success: true, action: "mute" });
+    } else if (action === "mute") {
+      try {
+        const token = client.createToken("admin-bot");
+        await fetch(
+          `https://video.stream-io-api.com/api/v2/calls/default/${roomName}/mute_users?api_key=${apiKey}`,
+          {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "stream-auth-type": "jwt",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              user_ids: [identity],
+              audio: true,
+              video: false,
+              screenshare: false,
+            }),
+          }
+        );
+        return NextResponse.json({ success: true, action: "mute" });
+      } catch (err: any) {
+        return NextResponse.json(
+          { error: err.message || "Failed to mute participant" },
+          { status: 500 }
+        );
+      }
+    } else if (action === "muteAll") {
+      return NextResponse.json(
+        { error: "muteAll is not supported via Stream API — use client-side controls" },
+        { status: 400 }
+      );
     } else {
       return NextResponse.json(
         { error: "Invalid action" },

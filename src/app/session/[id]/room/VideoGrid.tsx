@@ -1,15 +1,14 @@
-/* eslint-disable react/forbid-dom-props, react/forbid-component-props, react-native/no-inline-styles */
 "use client";
 
 import { useMemo } from "react";
-import type { RemoteParticipant } from "livekit-client";
+import type { StreamVideoParticipant } from "@stream-io/video-react-sdk";
 import ParticipantTile from "./ParticipantTile";
 
 export default function VideoGrid({
   participants,
   myLang,
 }: {
-  participants: RemoteParticipant[];
+  participants: StreamVideoParticipant[];
   myLang: string;
 }) {
   const layout = useMemo(() => deriveLayout(participants.length), [participants.length]);
@@ -23,16 +22,12 @@ export default function VideoGrid({
       }}
     >
       {participants.map((p) => (
-        <ParticipantTile key={p.identity} participant={p} myLang={myLang} />
+        <ParticipantTile key={p.userId} participant={p} myLang={myLang} />
       ))}
     </div>
   );
 }
 
-/**
- * Pick column count + max grid width based on participant count.
- * Keeps tiles a sensible size — never the whole viewport on a 1:1 call.
- */
 function deriveLayout(n: number): { cols: number; maxWidth: string } {
   if (n <= 1) return { cols: 1, maxWidth: "min(900px, 80vw)" };
   if (n <= 2) return { cols: 2, maxWidth: "min(1400px, 92vw)" };

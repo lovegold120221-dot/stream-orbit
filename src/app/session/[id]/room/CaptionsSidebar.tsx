@@ -1,13 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  useRemoteParticipants,
-  useTextStream,
-} from "@livekit/components-react";
+  useCall,
+  useCallStateHooks,
+} from "@stream-io/video-react-sdk";
 import { getLanguageByCode } from "@/lib/languages";
 
-const TRANSLATION_TOPIC = "lk.translation";
+interface TranslationEvent {
+  type: string;
+  kind?: string;
+  source_identity?: string;
+  target_lang?: string;
+  final?: string;
+  text?: string;
+  streamInfo?: {
+    attributes?: Record<string, string>;
+    timestamp?: number;
+  };
+  participantInfo?: {
+    identity?: string;
+    attributes?: Record<string, string>;
+  };
+}
 
 export default function CaptionsSidebar({
   open,
@@ -18,25 +33,49 @@ export default function CaptionsSidebar({
   open: boolean;
   onClose: () => void;
   myLang: string;
-  peerLangs: Map<string, string | undefined>;
+  peerLangs: Map<string, { lang: string | undefined; needsTranslation: boolean }>;
 }) {
-  const { textStreams } = useTextStream(TRANSLATION_TOPIC);
+  const call = useCall();
+  const { useRemoteParticipants } = useCallStateHooks();
   const remotes = useRemoteParticipants();
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [translationEvents, setTranslationEvents] = useState<TranslationEvent[]>([]);
+
+  // Listen for translation custom events from the translator agent
+  useEffect(() => {
+    if (!call) return;
+    const handler = (event: any) => {
+      if (event.custom?.type === "translation") {
+        setTranslationEvents((prev) => [...prev, event.custom]);
+      }
+    };
+    call.on("custom", handler);
+    return () => call.off("custom", handler);
+  }, [call]);
 
   const names = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of remotes) {
-      map.set(p.identity, p.name || p.identity);
+      map.set(p.userId, p.name || p.userId);
     }
     return map;
   }, [remotes]);
 
+  // Convert peerLangs Map<string, {lang, needsTranslation}> to Map<string, string | undefined>
+  const simplePeerLangs = useMemo(() => {
+    const map = new Map<string, string | undefined>();
+    peerLangs.forEach((v, k) => map.set(k, v.lang));
+    return map;
+  }, [peerLangs]);
+
   // Group source + translation text by speaker identity
   const entries = useMemo(() => {
-    const matching = textStreams
-      .filter((s) => s.streamInfo.attributes?.target_lang === myLang)
-      .sort((a, b) => a.streamInfo.timestamp - b.streamInfo.timestamp);
+    const matching = translationEvents
+      .filter((s) => {
+        const attrs = s.streamInfo?.attributes ?? s;
+        return attrs.target_lang === myLang;
+      })
+      .sort((a, b) => (a.streamInfo?.timestamp ?? 0) - (b.streamInfo?.timestamp ?? 0));
 
     type Entry = {
       key: string;
@@ -49,11 +88,10 @@ export default function CaptionsSidebar({
     const openIdxBySource = new Map<string, number>();
 
     for (const s of matching) {
-      const source =
-        s.streamInfo.attributes?.source_identity ?? s.participantInfo.identity;
-      const isSource = s.streamInfo.attributes?.kind === "source";
-      const isFinal = s.streamInfo.attributes?.final === "true";
-      const text = s.text.trim();
+      const source = s.source_identity ?? s.participantInfo?.identity ?? s.streamInfo?.attributes?.source_identity ?? "";
+      const isSource = s.kind === "source" || s.streamInfo?.attributes?.kind === "source";
+      const isFinal = s.final === "true" || s.streamInfo?.attributes?.final === "true";
+      const text = (s.text ?? "").trim();
 
       if (!text) {
         if (isFinal) openIdxBySource.delete(source);
@@ -62,20 +100,18 @@ export default function CaptionsSidebar({
 
       const openIdx = openIdxBySource.get(source);
       if (openIdx !== undefined) {
-        // Append to open entry
         if (isSource) {
           out[openIdx].sourceText = `${out[openIdx].sourceText} ${text}`.trim();
         } else {
           out[openIdx].translatedText = `${out[openIdx].translatedText} ${text}`.trim();
         }
       } else {
-        // New entry
         out.push({
           key: `entry-${out.length}`,
           sourceIdentity: source,
           sourceText: isSource ? text : "",
           translatedText: isSource ? "" : text,
-          sourceLang: peerLangs.get(source),
+          sourceLang: simplePeerLangs.get(source),
         });
         openIdxBySource.set(source, out.length - 1);
       }
@@ -83,7 +119,7 @@ export default function CaptionsSidebar({
       if (isFinal) openIdxBySource.delete(source);
     }
     return out;
-  }, [textStreams, myLang, peerLangs]);
+  }, [translationEvents, myLang, simplePeerLangs]);
 
   // Auto-scroll
   useEffect(() => {
@@ -146,7 +182,6 @@ export default function CaptionsSidebar({
   );
 }
 
-// Extract bracketed speaker tags (e.g. [A], [John]) and return clean speaker + dialogue.
 function parseSpeakerText(
   text: string,
   defaultSpeaker: string

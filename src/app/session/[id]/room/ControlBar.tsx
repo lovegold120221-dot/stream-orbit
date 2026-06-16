@@ -4,11 +4,12 @@ import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
-  useLocalParticipant,
-  useRoomContext,
-  useTrackVolume,
-} from "@livekit/components-react";
-import { Track, LocalAudioTrack } from "livekit-client";
+  useCall,
+  useCallStateHooks,
+  hasAudio,
+  hasVideo,
+  hasScreenShare,
+} from "@stream-io/video-react-sdk";
 import { isMobile, isIOS } from "@/lib/permissions";
 import { SpeakerIcon, SpeakerOffIcon } from "./icons";
 import {
@@ -117,8 +118,19 @@ export default function ControlBar({
   handRaised: boolean;
   onToggleHand: () => void;
 }) {
-  const { localParticipant, microphoneTrack, cameraTrack } = useLocalParticipant();
-  const room = useRoomContext();
+  const call = useCall();
+  const {
+    useLocalParticipant,
+    useMicrophoneState,
+    useCameraState,
+    useScreenShareState,
+  } = useCallStateHooks();
+
+  const localParticipant = useLocalParticipant();
+  const { isMute: isMicMuted, microphone } = useMicrophoneState();
+  const { isMute: isCamMuted } = useCameraState();
+  const { screenShare } = useScreenShareState();
+
   const router = useRouter();
   const [isLocalRecording, setIsLocalRecording] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
@@ -141,58 +153,27 @@ export default function ControlBar({
 
   const REACTIONS = ["✋", "👍", "👏", "😂", "❤️", "🎉", "🙌", "💯"];
 
-  const sendReaction = (emoji: string) => {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(JSON.stringify({
-      emoji,
-      from: localParticipant.name || localParticipant.identity,
-      fromId: localParticipant.identity,
-    }));
-    localParticipant.publishData(data, { topic: "react", reliable: true });
-  };
-
-  const openInvite = () => {
-    setShowInviteDialog(true);
-    setShowMoreMenu(false);
-    setShowReactions(false);
-  };
-
-  const copyMeetingLink = () => {
-    navigator.clipboard.writeText(window.location.href);
-    setInviteCopied(true);
-    setTimeout(() => setInviteCopied(false), 2000);
-  };
-
-  function getEmailLink() {
-    const subject = `Join my Orbit Meeting`;
-    const body = `You are invited to join my Orbit Meeting!\n\nMeeting Link: ${window.location.href}\n\nSee you there!`;
-    return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  }
-
-  function getGmailLink() {
-    const subject = `Join my Orbit Meeting`;
-    const body = `You are invited to join my Orbit Meeting!\n\nMeeting Link: ${window.location.href}\n\nSee you there!`;
-    return `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  }
-
-  function getWhatsAppLink() {
-    const text = `You are invited to join my Orbit Meeting!\n\nMeeting Link: ${window.location.href}`;
-    return `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-  }
-
-  const micOn = !!microphoneTrack && !microphoneTrack.isMuted;
-  const camOn =
-    !!cameraTrack &&
-    cameraTrack.source === Track.Source.Camera &&
-    !cameraTrack.isMuted;
-  const screenShareOn = localParticipant.isScreenShareEnabled;
+  // ── State derivations ──
+  const micOn = !isMicMuted;
+  const camOn = !isCamMuted;
+  const screenShareOn = hasScreenShare(localParticipant!);
+  const screenShareActive = screenShareOn || customScreenShareOn;
   const nativeScreenShare = getNativeScreenShareBridge();
   const browserScreenShareSupported =
     typeof navigator !== "undefined" &&
     Boolean(navigator.mediaDevices?.getDisplayMedia);
-  const screenShareActive = screenShareOn || customScreenShareOn;
   const screenAudioAvailable = !nativeScreenShare;
   const canStartScreenShare = Boolean(nativeScreenShare || browserScreenShareSupported);
+
+  // ── Audio level for mic button ──
+  const [micAudioLevel, setMicAudioLevel] = useState(0);
+  useEffect(() => {
+    if (!localParticipant) return;
+    const interval = setInterval(() => {
+      setMicAudioLevel(localParticipant.audioLevel ?? 0);
+    }, 200);
+    return () => clearInterval(interval);
+  }, [localParticipant]);
 
   useEffect(() => {
     if (!showShareDialog) return;
@@ -215,11 +196,23 @@ export default function ControlBar({
   }, [showShareDialog, shareStarting]);
 
   async function toggleMic() {
-    await localParticipant.setMicrophoneEnabled(!micOn);
+    if (!call) return;
+    if (micOn) {
+      await call.microphone.disable();
+    } else {
+      await call.microphone.enable();
+    }
   }
+
   async function toggleCam() {
-    await localParticipant.setCameraEnabled(!camOn);
+    if (!call) return;
+    if (camOn) {
+      await call.camera.disable();
+    } else {
+      await call.camera.enable();
+    }
   }
+
   async function handleShareScreen() {
     if (screenShareActive) {
       await stopShareScreen();
@@ -245,17 +238,17 @@ export default function ControlBar({
     if (customScreenShareTrackRef.current) {
       const track = customScreenShareTrackRef.current;
       track.stop();
-      await localParticipant.unpublishTrack(track);
       customScreenShareTrackRef.current = null;
       setCustomScreenShareOn(false);
     }
 
-    if (screenShareOn) {
-      await localParticipant.setScreenShareEnabled(false);
+    if (screenShareOn && call) {
+      await call.screenShare.disable().catch(() => {});
     }
   }
 
   async function confirmShareScreen() {
+    if (!call) return;
     const nativeShare = getNativeScreenShareBridge();
     if (!nativeShare && !browserScreenShareSupported) {
       setShareError("Screen sharing is not available in this browser.");
@@ -290,10 +283,8 @@ export default function ControlBar({
           setCustomScreenShareOn(false);
         });
 
-        await localParticipant.publishTrack(track, {
-          name: "screen",
-          source: Track.Source.ScreenShare,
-        });
+        // Native screen share — use Stream's built-in screen share.
+        await call.screenShare.enable();
         setCustomScreenShareOn(true);
         setShowShareDialog(false);
       } catch (e: unknown) {
@@ -307,14 +298,7 @@ export default function ControlBar({
     }
 
     try {
-      await localParticipant.setScreenShareEnabled(true, {
-        audio: shareWithAudio,
-        video: true,
-        systemAudio: shareWithAudio ? "include" : "exclude",
-        surfaceSwitching: "include",
-        selfBrowserSurface: "include",
-        contentHint: "detail",
-      });
+      await call.screenShare.enable();
       setShowShareDialog(false);
     } catch (e: unknown) {
       setShareError(`Failed to start screen share: ${getShareErrorMessage(e)}`);
@@ -322,6 +306,48 @@ export default function ControlBar({
       setShareStarting(false);
     }
   }
+
+  const sendReaction = async (emoji: string) => {
+    if (!call) return;
+    try {
+      await call.sendCustomEvent({
+        type: "react",
+        emoji,
+        from: localParticipant?.name || localParticipant?.userId || "user",
+        fromId: localParticipant?.userId || "",
+      });
+    } catch {}
+  };
+
+  const openInvite = () => {
+    setShowInviteDialog(true);
+    setShowMoreMenu(false);
+    setShowReactions(false);
+  };
+
+  const copyMeetingLink = () => {
+    navigator.clipboard.writeText(window.location.href);
+    setInviteCopied(true);
+    setTimeout(() => setInviteCopied(false), 2000);
+  };
+
+  function getEmailLink() {
+    const subject = `Join my Orbit Meeting`;
+    const body = `You are invited to join my Orbit Meeting!\n\nMeeting Link: ${window.location.href}\n\nSee you there!`;
+    return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }
+
+  function getGmailLink() {
+    const subject = `Join my Orbit Meeting`;
+    const body = `You are invited to join my Orbit Meeting!\n\nMeeting Link: ${window.location.href}\n\nSee you there!`;
+    return `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }
+
+  function getWhatsAppLink() {
+    const text = `You are invited to join my Orbit Meeting!\n\nMeeting Link: ${window.location.href}`;
+    return `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+  }
+
   async function toggleRecording() {
     if (isLocalRecording) {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -335,7 +361,7 @@ export default function ControlBar({
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: "browser" },
         audio: true,
-        // @ts-expect-error - preferCurrentTab is a relatively new API flag not in all TS definitions
+        // @ts-expect-error - preferCurrentTab is a relatively new API flag
         preferCurrentTab: true,
       });
 
@@ -349,17 +375,16 @@ export default function ControlBar({
 
       mediaRecorder.onstop = async () => {
         recordedBlob = new Blob(chunks, { type: "video/webm" });
-        const filename = `orbit-recording-${room.name}-${Date.now()}.webm`;
+        const filename = `orbit-recording-${call?.id ?? "meeting"}-${Date.now()}.webm`;
 
-        // Try File System Access API: showSaveFilePicker lets user pick save location
         try {
-          // @ts-expect-error - File System Access API types from WICG spec
+          // @ts-expect-error - File System Access API
           const fileHandle = await window.showSaveFilePicker?.({
             suggestedName: filename,
             types: [{ description: 'WebM Video', accept: { 'video/webm': ['.webm'] } }],
           });
           if (fileHandle) {
-            const writable = await (fileHandle as unknown as { createWritable: () => Promise<FileSystemWritableFileStream> }).createWritable();
+            const writable = await (fileHandle as any).createWritable();
             await writable.write(recordedBlob);
             await writable.close();
             stream.getTracks().forEach((t) => t.stop());
@@ -372,7 +397,6 @@ export default function ControlBar({
           }
         }
 
-        // Fallback: download via <a> tag
         const url = URL.createObjectURL(recordedBlob);
         const a = document.createElement("a");
         document.body.appendChild(a);
@@ -390,7 +414,6 @@ export default function ControlBar({
       mediaRecorderRef.current = mediaRecorder;
       setIsLocalRecording(true);
 
-      // Stop recording if the user closes the screen share via the browser UI
       stream.getVideoTracks()[0].onended = () => {
         if (mediaRecorder.state !== 'inactive') {
           mediaRecorder.stop();
@@ -402,11 +425,15 @@ export default function ControlBar({
       setIsLocalRecording(false);
     }
   }
+
   function toggleBreakout() {
     onToggleSidebar("breakout");
   }
+
   async function leave() {
-    await room.disconnect();
+    if (call) {
+      await call.leave().catch(() => {});
+    }
     onLeave();
   }
 
@@ -417,7 +444,7 @@ export default function ControlBar({
         <MicButton
           micOn={micOn}
           toggleMic={toggleMic}
-          microphoneTrack={microphoneTrack?.track as LocalAudioTrack | undefined}
+          audioLevel={micAudioLevel}
         />
         <CtrlButton
           active={camOn}
@@ -446,7 +473,6 @@ export default function ControlBar({
           dataMobile="overflow"
           hasCaret
         />
-        {/* Mobile "People" alias */}
         <CtrlButton
           active={activeSidebar === "participants"}
           onClick={() => onToggleSidebar("participants")}
@@ -531,7 +557,6 @@ export default function ControlBar({
         >
           Leave
         </button>
-        {/* Mobile only */}
         <CtrlButton
           active={showMoreMenu}
           onClick={() => setShowMoreMenu((v) => !v)}
@@ -785,22 +810,21 @@ export default function ControlBar({
 function MicButton({
   micOn,
   toggleMic,
-  microphoneTrack,
+  audioLevel,
 }: {
   micOn: boolean;
   toggleMic: () => void;
-  microphoneTrack?: LocalAudioTrack;
+  audioLevel: number;
 }) {
-  const volume = useTrackVolume(microphoneTrack);
-  const isSpeaking = micOn && volume > 0.05;
+  const isSpeaking = micOn && audioLevel > 0.05;
   const wrapperRef = useRef<HTMLDivElement>(null);
-  
+
   useEffect(() => {
     if (wrapperRef.current) {
-      wrapperRef.current.style.setProperty('--volume-opacity', isSpeaking ? String(Math.min(0.8, volume * 2)) : '0');
-      wrapperRef.current.style.setProperty('--volume-scale', isSpeaking ? String(1 + (volume * 0.5)) : '1');
+      wrapperRef.current.style.setProperty('--volume-opacity', isSpeaking ? String(Math.min(0.8, audioLevel * 2)) : '0');
+      wrapperRef.current.style.setProperty('--volume-scale', isSpeaking ? String(1 + (audioLevel * 0.5)) : '1');
     }
-  }, [isSpeaking, volume]);
+  }, [isSpeaking, audioLevel]);
 
   return (
     <div ref={wrapperRef} className="mic-btn-wrapper">

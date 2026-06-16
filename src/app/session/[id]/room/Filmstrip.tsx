@@ -1,13 +1,13 @@
 "use client";
 
-import type { RemoteParticipant } from "livekit-client";
+import type { StreamVideoParticipant } from "@stream-io/video-react-sdk";
 import ParticipantTile from "./ParticipantTile";
 
 export default function Filmstrip({
   participants,
   myLang,
 }: {
-  participants: RemoteParticipant[];
+  participants: StreamVideoParticipant[];
   myLang: string;
 }) {
   if (participants.length === 0) return null;
@@ -15,7 +15,7 @@ export default function Filmstrip({
   return (
     <div className="filmstrip">
       {participants.map((p) => (
-        <ParticipantTile key={p.identity} participant={p} myLang={myLang} />
+        <ParticipantTile key={p.userId} participant={p} myLang={myLang} />
       ))}
     </div>
   );

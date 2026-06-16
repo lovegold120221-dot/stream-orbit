@@ -15,25 +15,24 @@ function getSessionItem(key: string) {
 
 interface TokenResponse {
   token: string;
-  serverUrl: string;
+  apiKey: string;
+  callType: string;
+  callId: string;
 }
 
 export default function RoomClient({ sessionId }: { sessionId: string }) {
   const router = useRouter();
   const { activeCall, setActiveCall, leaveCall } = useCallContext();
   const [token, setToken] = useState<string | null>(null);
-  const [serverUrl, setServerUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // For breakout rooms: use the pre-generated identity from the breakout API.
-  // Read synchronously during render (not in useEffect) so useState can use it.
   const breakoutIdentity =
     typeof window !== "undefined"
       ? window.sessionStorage.getItem("orbit.breakout-identity")
       : null;
 
   const [identity] = useState(() => {
-    // Breakout rooms use the identity from the pre-generated token.
     if (breakoutIdentity) return breakoutIdentity;
     return typeof crypto !== "undefined" && crypto.randomUUID
       ? `peer-${crypto.randomUUID().slice(0, 8)}`
@@ -57,35 +56,37 @@ export default function RoomClient({ sessionId }: { sessionId: string }) {
     }
   }, [router, sessionId]);
 
-  // Mint a LiveKit token. For breakout rooms, use pre-generated token if available.
+  // Mint a Stream token. For breakout rooms, use pre-generated token if available.
   useEffect(() => {
     if (!displayName) return;
 
     // Check if this is a breakout room with a pre-generated token
-    const breakoutToken = typeof window !== 'undefined' ? window.sessionStorage.getItem("orbit.breakout-token") : null;
-    const breakoutUrl = typeof window !== 'undefined' ? window.sessionStorage.getItem("orbit.breakout-server-url") : null;
+    const breakoutToken =
+      typeof window !== "undefined"
+        ? window.sessionStorage.getItem("orbit.breakout-token")
+        : null;
 
-    if (breakoutToken && breakoutUrl) {
+    if (breakoutToken) {
       setToken(breakoutToken);
-      setServerUrl(breakoutUrl);
       // Clean up so reconnects use normal flow
       window.sessionStorage.removeItem("orbit.breakout-token");
       window.sessionStorage.removeItem("orbit.breakout-server-url");
       return;
     }
 
-    const isHost = typeof window !== 'undefined' && window.sessionStorage.getItem("orbitHostRoom") === sessionId;
-    
     // If we are already connected to this session, reuse the context
     if (activeCall && activeCall.sessionId === sessionId) {
       setToken(activeCall.token);
-      setServerUrl(activeCall.serverUrl);
       return;
     }
 
+    const isHost =
+      typeof window !== "undefined" &&
+      window.sessionStorage.getItem("orbitHostRoom") === sessionId;
+
     const url = `/api/token?room=${encodeURIComponent(
       sessionId,
-    )}&identity=${encodeURIComponent(identity)}&name=${encodeURIComponent(displayName)}${isHost ? '&host=true' : ''}`;
+    )}&identity=${encodeURIComponent(identity)}&name=${encodeURIComponent(displayName)}${isHost ? "&host=true" : ""}`;
     fetch(url)
       .then(async (res) => {
         if (!res.ok) {
@@ -96,12 +97,10 @@ export default function RoomClient({ sessionId }: { sessionId: string }) {
       })
       .then((data) => {
         setToken(data.token);
-        setServerUrl(data.serverUrl);
         setActiveCall({
           token: data.token,
-          serverUrl: data.serverUrl,
           sessionId,
-          initialLang
+          initialLang,
         });
       })
       .catch((err) => setError(err.message));
@@ -118,9 +117,7 @@ export default function RoomClient({ sessionId }: { sessionId: string }) {
           <h1 className="display display-md mb-16">
             Couldn&apos;t join the call
           </h1>
-          <p className="body mb-24">
-            {error}
-          </p>
+          <p className="body mb-24">{error}</p>
           <button className="btn btn-outline" onClick={() => router.push("/")}>
             Back to home
           </button>
@@ -129,7 +126,7 @@ export default function RoomClient({ sessionId }: { sessionId: string }) {
     );
   }
 
-  if (!token || !serverUrl) {
+  if (!token) {
     return (
       <div className="page text-center">
         <div className="container">

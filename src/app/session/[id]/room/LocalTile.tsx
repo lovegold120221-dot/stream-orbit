@@ -1,58 +1,38 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useIsSpeaking, useLocalParticipant } from "@livekit/components-react";
-import { Track } from "livekit-client";
+import {
+  useCallStateHooks,
+  hasVideo,
+  hasAudio,
+} from "@stream-io/video-react-sdk";
 import { MicOffIcon } from "./icons";
 
 export default function LocalTile({ myLang }: { myLang: string }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const { localParticipant } = useLocalParticipant();
-  const [cameraOn, setCameraOn] = useState(false);
-  const [micOn, setMicOn] = useState(false);
-  
-  const isSpeaking = useIsSpeaking(localParticipant);
+  const { useLocalParticipant } = useCallStateHooks();
+  const localParticipant = useLocalParticipant();
+
+  const cameraOn = localParticipant ? hasVideo(localParticipant) : false;
+  const micOn = localParticipant ? hasAudio(localParticipant) : false;
+  const isSpeaking = localParticipant?.isSpeaking ?? false;
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const sync = () => {
-      let cam = false;
-      let mic = false;
-      for (const pub of localParticipant.videoTrackPublications.values()) {
-        if (pub.source === Track.Source.Camera && pub.track && !pub.isMuted) {
-          pub.track.attach(video);
-          cam = true;
-        }
-      }
-      for (const pub of localParticipant.audioTrackPublications.values()) {
-        if (pub.source === Track.Source.Microphone && !pub.isMuted) {
-          mic = true;
-        }
-      }
-      if (!cam) video.srcObject = null;
-      setCameraOn(cam);
-      setMicOn(mic);
-    };
+    if (cameraOn && localParticipant?.videoStream) {
+      video.srcObject = localParticipant.videoStream;
+    } else {
+      video.srcObject = null;
+    }
 
-    sync();
-    localParticipant.on("localTrackPublished", sync);
-    localParticipant.on("localTrackUnpublished", sync);
-    localParticipant.on("trackMuted", sync);
-    localParticipant.on("trackUnmuted", sync);
     return () => {
-      localParticipant.off("localTrackPublished", sync);
-      localParticipant.off("localTrackUnpublished", sync);
-      localParticipant.off("trackMuted", sync);
-      localParticipant.off("trackUnmuted", sync);
-      for (const pub of localParticipant.videoTrackPublications.values()) {
-        if (pub.track) pub.track.detach(video);
-      }
+      video.srcObject = null;
     };
-  }, [localParticipant]);
+  }, [localParticipant?.videoStream, cameraOn]);
 
-  const displayName = localParticipant.name || localParticipant.identity || "You";
+  const displayName = localParticipant?.name || localParticipant?.userId || "You";
   const initial = displayName.slice(0, 1).toUpperCase();
 
   return (

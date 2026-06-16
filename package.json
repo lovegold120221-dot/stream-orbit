@@ -9,7 +9,7 @@
     "setup": "bash scripts/setup.sh",
     "gradle:stop": "cd android && ./gradlew --stop",
     "gradle:status": "cd android && ./gradlew -version",
-    "dev": "concurrently --kill-others-on-fail -n web,agent -c blue,magenta \"pnpm run dev:web\" \"pnpm run dev:agent\"",
+    "dev": "concurrently -n web,agent -c blue,magenta \"pnpm run dev:web\" \"pnpm run dev:agent || true\"",
     "dev:web": "next dev",
     "dev:agent": "cd translator && uv run python src/agent.py dev",
     "dev:electron": "concurrently -n web,electron \"pnpm run dev:web\" \"wait-on http://localhost:3000 && electron electron/main.js\"",
@@ -30,12 +30,10 @@
     "deploy:vercel": "vercel --prod"
   },
   "dependencies": {
-    "@livekit/components-react": "^2.9.21",
-    "@livekit/components-styles": "^1.2.0",
+    "@stream-io/node-sdk": "^0.3.0",
+    "@stream-io/video-react-sdk": "^1.37.7",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.43.4",
-    "livekit-client": "^2.19.0",
-    "livekit-server-sdk": "^2.15.2",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4"

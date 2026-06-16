@@ -1,7 +1,11 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useRoomContext, useLocalParticipant } from "@livekit/components-react";
+import {
+  useCall,
+  useCallStateHooks,
+  hasScreenShare,
+} from "@stream-io/video-react-sdk";
 
 export default function PersistentCallBar({ 
   sessionId, 
@@ -12,13 +16,16 @@ export default function PersistentCallBar({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const room = useRoomContext();
-  const { localParticipant } = useLocalParticipant();
+  const call = useCall();
+  const { useLocalParticipant } = useCallStateHooks();
+  const localParticipant = useLocalParticipant();
 
   // Hide the floating bar if we are actively viewing the room page
   if (pathname === `/session/${sessionId}/room`) {
     return null;
   }
+
+  const isScreenSharing = localParticipant ? hasScreenShare(localParticipant) : false;
 
   return (
     <div className="persistent-call-bar">
@@ -36,10 +43,10 @@ export default function PersistentCallBar({
             Return to Room
           </button>
           
-          {localParticipant?.isScreenShareEnabled && (
+          {isScreenSharing && call && (
             <button 
               className="btn btn-outline" 
-              onClick={() => localParticipant.setScreenShareEnabled(false)}
+              onClick={() => call.screenShare.disable().catch(() => {})}
             >
               Stop Screen Share
             </button>
@@ -48,7 +55,7 @@ export default function PersistentCallBar({
           <button 
             className="btn persistent-call-leave" 
             onClick={async () => {
-              await room.disconnect();
+              if (call) await call.leave().catch(() => {});
               onLeave();
             }}
           >

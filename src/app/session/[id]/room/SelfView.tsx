@@ -1,30 +1,29 @@
-/* eslint-disable react/forbid-dom-props, react/forbid-component-props, react-native/no-inline-styles */
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useLocalParticipant } from "@livekit/components-react";
-import { Track } from "livekit-client";
+import {
+  useCallStateHooks,
+  hasVideo,
+} from "@stream-io/video-react-sdk";
 
 export default function SelfView() {
-  const { localParticipant, cameraTrack } = useLocalParticipant();
+  const { useLocalParticipant } = useCallStateHooks();
+  const localParticipant = useLocalParticipant();
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const track = cameraTrack?.track;
-  const cameraOn =
-    !!track &&
-    cameraTrack?.source === Track.Source.Camera &&
-    !cameraTrack.isMuted;
+  const cameraOn = localParticipant ? hasVideo(localParticipant) : false;
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (cameraOn && track) {
-      track.attach(video);
-      return () => {
-        track.detach(video);
-      };
+    if (cameraOn && localParticipant?.videoStream) {
+      video.srcObject = localParticipant.videoStream;
+    } else {
+      video.srcObject = null;
     }
-    video.srcObject = null;
-  }, [cameraOn, track]);
+    return () => {
+      video.srcObject = null;
+    };
+  }, [localParticipant?.videoStream, cameraOn]);
 
   const displayName = localParticipant?.name || "you";
 

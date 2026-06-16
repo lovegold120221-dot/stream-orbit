@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { type RemoteParticipant } from "livekit-client";
+import { type StreamVideoParticipant } from "@stream-io/video-react-sdk";
 import ParticipantTile from "./ParticipantTile";
 import LocalTile from "./LocalTile";
 
@@ -11,7 +11,7 @@ export default function GalleryView({
   isHost,
   roomName,
 }: {
-  remotes: RemoteParticipant[];
+  remotes: StreamVideoParticipant[];
   myLang: string;
   isHost: boolean;
   roomName: string;
@@ -20,19 +20,12 @@ export default function GalleryView({
   
   let gridClass = "gallery-grid-1";
   
-  if (count === 1) {
-    gridClass = "gallery-grid-1";
-  } else if (count === 2) {
-    gridClass = "gallery-grid-2";
-  } else if (count <= 4) {
-    gridClass = "gallery-grid-4";
-  } else if (count <= 6) {
-    gridClass = "gallery-grid-6";
-  } else if (count <= 9) {
-    gridClass = "gallery-grid-9";
-  } else {
-    gridClass = "gallery-grid-n";
-  }
+  if (count === 1) gridClass = "gallery-grid-1";
+  else if (count === 2) gridClass = "gallery-grid-2";
+  else if (count <= 4) gridClass = "gallery-grid-4";
+  else if (count <= 6) gridClass = "gallery-grid-6";
+  else if (count <= 9) gridClass = "gallery-grid-9";
+  else gridClass = "gallery-grid-n";
 
   return (
     <div className={`gallery-view ${gridClass}`}>
@@ -40,7 +33,7 @@ export default function GalleryView({
         <LocalTile myLang={myLang} />
       </div>
       {remotes.map((p) => (
-        <div key={p.identity} className="gallery-view-item">
+        <div key={p.userId} className="gallery-view-item">
           <ParticipantTile participant={p} myLang={myLang} isHost={isHost} roomName={roomName} />
         </div>
       ))}

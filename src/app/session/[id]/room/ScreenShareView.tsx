@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  useLocalParticipant,
-  useRemoteParticipants,
-  useRoomContext,
-} from "@livekit/components-react";
-import { Track, RoomEvent, type Participant } from "livekit-client";
-import { PARTICIPANT_LANG_ATTR } from "@/lib/config";
+  useCall,
+  useCallStateHooks,
+  hasScreenShare,
+  type StreamVideoParticipant,
+} from "@stream-io/video-react-sdk";
+import { PARTICIPANT_LANG_ATTR, type ParticipantCustomData } from "@/lib/config";
 import { getLanguageByCode } from "@/lib/languages";
 
 /**
@@ -21,96 +21,65 @@ export default function ScreenShareView({
   myLang: string;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const room = useRoomContext();
-  const { localParticipant } = useLocalParticipant();
+  const call = useCall();
+  const { useLocalParticipant, useRemoteParticipants } = useCallStateHooks();
+  const localParticipant = useLocalParticipant();
   const remotes = useRemoteParticipants();
   const [activeShare, setActiveShare] = useState<{
-    participant: Participant;
-    track: MediaStreamTrack;
+    participant: StreamVideoParticipant;
+    stream: MediaStream | null;
   } | null>(null);
 
-  // Collect all participants with unmuted screen share tracks
+  // Collect all participants with screen share
   useEffect(() => {
     const sync = () => {
       // Check local participant first
-      for (const pub of localParticipant.videoTrackPublications.values()) {
-        if (
-          pub.source === Track.Source.ScreenShare &&
-          pub.track &&
-          !pub.isMuted
-        ) {
-          const track = pub.track.mediaStreamTrack;
-          setActiveShare((prev) => 
-            prev?.track === track && prev?.participant.identity === localParticipant.identity 
-              ? prev 
-              : { participant: localParticipant, track }
+      if (localParticipant && hasScreenShare(localParticipant)) {
+        setActiveShare((prev) =>
+          prev?.participant?.userId === localParticipant.userId && prev.stream === localParticipant.screenShareStream
+            ? prev
+            : { participant: localParticipant, stream: localParticipant.screenShareStream ?? null }
+        );
+        return;
+      }
+      // Then check remotes
+      for (const p of remotes) {
+        if (hasScreenShare(p)) {
+          setActiveShare((prev) =>
+            prev?.participant?.userId === p.userId && prev.stream === p.screenShareStream
+              ? prev
+              : { participant: p, stream: p.screenShareStream ?? null }
           );
           return;
         }
       }
-      // Then check remotes
-      for (const p of remotes) {
-        for (const pub of p.videoTrackPublications.values()) {
-          if (
-            pub.source === Track.Source.ScreenShare &&
-            pub.track &&
-            !pub.isMuted
-          ) {
-            const track = pub.track.mediaStreamTrack;
-            setActiveShare((prev) => 
-              prev?.track === track && prev?.participant.identity === p.identity 
-                ? prev 
-                : { participant: p, track }
-            );
-            return;
-          }
-        }
-      }
-      setActiveShare((prev) => prev === null ? null : null);
+      setActiveShare(null);
     };
 
     sync();
-
-    const events = [
-      RoomEvent.TrackSubscribed,
-      RoomEvent.TrackUnsubscribed,
-      RoomEvent.TrackPublished,
-      RoomEvent.TrackUnpublished,
-      RoomEvent.TrackMuted,
-      RoomEvent.TrackUnmuted,
-      RoomEvent.LocalTrackPublished,
-      RoomEvent.LocalTrackUnpublished,
-    ];
-    for (const ev of events) {
-      room.on(ev, sync);
-    }
-    return () => {
-      for (const ev of events) {
-        room.off(ev, sync);
-      }
-    };
-  }, [localParticipant, remotes, room]);
+    const interval = setInterval(sync, 2000);
+    return () => clearInterval(interval);
+  }, [localParticipant, remotes]);
 
   // Attach/detach the screen share video track to our <video> element
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !activeShare?.track) {
+    if (!video || !activeShare?.stream) {
       if (video) video.srcObject = null;
       return;
     }
-    const stream = new MediaStream([activeShare.track]);
-    video.srcObject = stream;
+    video.srcObject = activeShare.stream;
     return () => {
       video.srcObject = null;
     };
-  }, [activeShare?.track]);
+  }, [activeShare?.stream]);
 
   if (!activeShare) return null;
 
   const participant = activeShare.participant;
-  const displayName = participant.name || participant.identity;
-  const isLocal = participant.identity === localParticipant.identity;
-  const speakerLang = participant.attributes?.[PARTICIPANT_LANG_ATTR];
+  const displayName = participant.name || participant.userId;
+  const isLocal = participant.userId === localParticipant?.userId;
+  const speakerLang = (participant.custom as ParticipantCustomData)?.lang;
   const langInfo = speakerLang ? getLanguageByCode(speakerLang) : undefined;
   const needsTranslation = !!speakerLang && speakerLang !== myLang;
 
@@ -131,10 +100,10 @@ export default function ScreenShareView({
             </span>
             <span className="screen-share-label"> is sharing screen</span>
           </div>
-          {isLocal && (
+          {isLocal && call && (
             <button
               className="screen-share-stop-btn"
-              onClick={() => localParticipant.setScreenShareEnabled(false)}
+              onClick={() => call.screenShare.disable().catch(() => {})}
             >
               Stop Sharing
             </button>
@@ -143,7 +112,7 @@ export default function ScreenShareView({
         <div className="screen-share-overlay-bottom">
           {needsTranslation && (
             <span className="screen-share-status">
-              → {getLanguageByCode(myLang)?.name || myLang} &middot; Orus
+              &rarr; {getLanguageByCode(myLang)?.name || myLang} &middot; Orus
             </span>
           )}
           {langInfo && !isLocal && !needsTranslation && (

@@ -2,7 +2,10 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { PICKER_LANGUAGES, getLanguageByCode } from "@/lib/languages";
-import { useTextStream, useRemoteParticipants, useLocalParticipant, useDataChannel } from "@livekit/components-react";
+import {
+  useCall,
+  useCallStateHooks,
+} from "@stream-io/video-react-sdk";
 import { SpeakerIcon, SpeakerOffIcon } from "./icons";
 import { saveHistory, uploadHistoryToSupabase, type TranslationHistoryEntry } from "@/lib/translationHistory";
 
@@ -22,7 +25,21 @@ const VOICES = [
   { id: "female2", name: "Female 2" },
 ];
 
-const TRANSLATION_TOPIC = "lk.translation";
+interface TranslationEvent {
+  type: string;
+  kind?: string;
+  source_identity?: string;
+  target_lang?: string;
+  final?: string;
+  text?: string;
+  streamInfo?: {
+    attributes?: Record<string, string>;
+    timestamp?: number;
+  };
+  participantInfo?: {
+    identity?: string;
+  };
+}
 
 export default function OrbitTranslationPanel({
   onClose,
@@ -38,23 +55,24 @@ export default function OrbitTranslationPanel({
   onLangChange: (lang: string) => void;
   translatorMuted: boolean;
   onToggleTranslator: () => void;
-  peerLangs: Map<string, string | undefined>;
+  peerLangs: Map<string, { lang: string | undefined; needsTranslation: boolean }>;
   roomName: string;
 }) {
-  const [voice, setVoice] = useState("male1");
-  const { textStreams } = useTextStream(TRANSLATION_TOPIC);
+  const call = useCall();
+  const { useRemoteParticipants, useLocalParticipant } = useCallStateHooks();
   const remotes = useRemoteParticipants();
-  const { localParticipant } = useLocalParticipant();
+  const localParticipant = useLocalParticipant();
   const sourceBodyRef = useRef<HTMLDivElement | null>(null);
   const translatedBodyRef = useRef<HTMLDivElement | null>(null);
 
+  const [voice, setVoice] = useState("male1");
   const [adjustingEntry, setAdjustingEntry] = useState<{
     key: string;
     text: string;
     sourceText: string;
   } | null>(null);
-
   const [retranslations, setRetranslations] = useState<Record<string, string>>({});
+  const [translationEvents, setTranslationEvents] = useState<TranslationEvent[]>([]);
 
   const TONE_OPTIONS = [
     { id: "formal", label: "Formal", emoji: "👔" },
@@ -63,59 +81,79 @@ export default function OrbitTranslationPanel({
     { id: "simple", label: "Simple (ELI5)", emoji: "👶" },
   ];
 
-  useDataChannel("retranslation_response", (msg) => {
-    try {
-      const decoder = new TextDecoder();
-      const payload = JSON.parse(decoder.decode(msg.payload));
-      if (payload.key && payload.text) {
-        setRetranslations((prev) => ({
-          ...prev,
-          [payload.key]: payload.text,
-        }));
+  // ── Listen for translation events ──
+  useEffect(() => {
+    if (!call) return;
+    const handler = (event: any) => {
+      if (event.custom?.type === "translation") {
+        setTranslationEvents((prev) => [...prev, event.custom]);
       }
-    } catch (e) {
-      console.error("Failed to parse retranslation response:", e);
-    }
-  });
+      // Retranslation responses
+      if (event.custom?.type === "retranslation_response") {
+        const payload = event.custom;
+        if (payload.key && payload.text) {
+          setRetranslations((prev) => ({
+            ...prev,
+            [payload.key]: payload.text,
+          }));
+        }
+      }
+    };
+    call.on("custom", handler);
+    return () => call.off("custom", handler);
+  }, [call]);
 
-  const requestRetranslation = (entry: Entry, tone: string) => {
+  // ── Request retranslation ──
+  const requestRetranslation = async (entry: Entry, tone: string) => {
+    if (!call) return;
     const payload = {
+      type: "retranslation_request",
       key: entry.key,
       sourceText: entry.sourceText || entry.translatedText,
       target_lang: myLang,
       adjustment: tone,
     };
 
-    const encoder = new TextEncoder();
-    const data = encoder.encode(JSON.stringify(payload));
-    localParticipant.publishData(data, {
-      topic: "retranslation_request",
-      reliable: true,
-    });
+    try {
+      await call.sendCustomEvent(payload);
+    } catch (err) {
+      console.warn("Failed to send retranslation request:", err);
+    }
     setAdjustingEntry(null);
   };
 
   const names = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of remotes) {
-      map.set(p.identity, p.name || p.identity);
+      map.set(p.userId, p.name || p.userId);
     }
     return map;
   }, [remotes]);
 
+  // Convert peerLangs to simple Map<string, string | undefined>
+  const simplePeerLangs = useMemo(() => {
+    const map = new Map<string, string | undefined>();
+    peerLangs.forEach((v, k) => map.set(k, v.lang));
+    return map;
+  }, [peerLangs]);
+
+  // ── Process translation events into entries ──
   const entries = useMemo(() => {
-    const matching = textStreams
-      .filter((s) => s.streamInfo.attributes?.target_lang === myLang)
-      .sort((a, b) => a.streamInfo.timestamp - b.streamInfo.timestamp);
+    const matching = translationEvents
+      .filter((s) => {
+        const attrs = s.streamInfo?.attributes ?? s;
+        return attrs.target_lang === myLang;
+      })
+      .sort((a, b) => (a.streamInfo?.timestamp ?? 0) - (b.streamInfo?.timestamp ?? 0));
 
     const out: Entry[] = [];
     const openIdxBySource = new Map<string, number>();
 
     for (const s of matching) {
-      const source = s.streamInfo.attributes?.source_identity ?? s.participantInfo.identity;
-      const isSource = s.streamInfo.attributes?.kind === "source";
-      const isFinal = s.streamInfo.attributes?.final === "true";
-      const text = s.text.trim();
+      const source = s.source_identity ?? s.participantInfo?.identity ?? s.streamInfo?.attributes?.source_identity ?? "";
+      const isSource = s.kind === "source" || s.streamInfo?.attributes?.kind === "source";
+      const isFinal = s.final === "true" || s.streamInfo?.attributes?.final === "true";
+      const text = (s.text ?? "").trim();
 
       if (!text) {
         if (isFinal) {
@@ -130,7 +168,6 @@ export default function OrbitTranslationPanel({
 
       const openIdx = openIdxBySource.get(source);
       if (openIdx !== undefined) {
-        // Append to open entry
         if (isSource) {
           out[openIdx].sourceText = `${out[openIdx].sourceText} ${text}`.trim();
         } else {
@@ -138,13 +175,12 @@ export default function OrbitTranslationPanel({
         }
         if (isFinal) out[openIdx].isFinal = true;
       } else {
-        // New entry
         out.push({
           key: `entry-${out.length}`,
           sourceIdentity: source,
           sourceText: isSource ? text : "",
           translatedText: isSource ? "" : text,
-          sourceLang: peerLangs.get(source),
+          sourceLang: simplePeerLangs.get(source),
           isFinal: isFinal,
         });
         openIdxBySource.set(source, out.length - 1);
@@ -158,8 +194,9 @@ export default function OrbitTranslationPanel({
       }
       return entry;
     });
-  }, [textStreams, myLang, peerLangs, retranslations]);
+  }, [translationEvents, myLang, simplePeerLangs, retranslations]);
 
+  // Autoscroll
   useEffect(() => {
     if (!sourceBodyRef.current) return;
     sourceBodyRef.current.scrollTop = sourceBodyRef.current.scrollHeight;
@@ -174,11 +211,9 @@ export default function OrbitTranslationPanel({
   const savedKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    // Only capture entries that have both source and translation
     const newEntries: TranslationHistoryEntry[] = [];
     for (const entry of entries) {
       if (savedKeysRef.current.has(entry.key)) continue;
-      // Only capture when the turn is actually finalized
       if (!entry.isFinal) continue;
       if (!entry.sourceText || !entry.translatedText) continue;
 
@@ -264,7 +299,6 @@ export default function OrbitTranslationPanel({
         <div ref={sourceBodyRef} className="otp-scroll-area otp-scroll-area--source">
           {sourceEntries.length === 0 ? (
             <div className="captions-empty">
-              
             </div>
           ) : (
             sourceEntries.map((entry) => {
@@ -292,7 +326,6 @@ export default function OrbitTranslationPanel({
         <div ref={translatedBodyRef} className="otp-scroll-area otp-scroll-area--translated">
           {translatedEntries.length === 0 ? (
             <div className="captions-empty">
-              
             </div>
           ) : (
             translatedEntries.map((entry) => {
@@ -364,7 +397,6 @@ export default function OrbitTranslationPanel({
   );
 }
 
-// Extract bracketed speaker tags (e.g. [A], [John]) and return clean speaker + dialogue.
 function parseSpeakerText(
   text: string,
   defaultSpeaker: string

@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import {
-  useDataChannel,
-  useLocalParticipant,
-  useRemoteParticipants,
-  useRoomContext,
-  useTracks,
-} from "@livekit/components-react";
-import { ConnectionState, ParticipantKind, RoomEvent, Track } from "livekit-client";
+  useCall,
+  useCallStateHooks,
+  hasAudio,
+  hasVideo,
+  hasScreenShare,
+  type StreamVideoParticipant,
+} from "@stream-io/video-react-sdk";
 import { useRouter } from "next/navigation";
-import { PARTICIPANT_LANG_ATTR } from "@/lib/config";
+import { PARTICIPANT_LANG_ATTR, type ParticipantCustomData } from "@/lib/config";
 import { getLanguageByCode } from "@/lib/languages";
 import { useTranslationRouting } from "./useTranslationRouting";
 import { useUser } from "@/context/UserContext";
@@ -32,10 +32,22 @@ export default function InCall({
   initialLang: string;
   onLeave: () => void;
 }) {
-  const room = useRoomContext();
-  const { localParticipant } = useLocalParticipant();
+  const call = useCall();
+  const {
+    useLocalParticipant,
+    useRemoteParticipants,
+    useHasOngoingScreenShare,
+    useDominantSpeaker,
+    useCallCallingState,
+  } = useCallStateHooks();
+
+  const localParticipant = useLocalParticipant();
   const remotes = useRemoteParticipants();
+  const hasScreenShare = useHasOngoingScreenShare();
+  const dominantSpeaker = useDominantSpeaker();
+  const callingState = useCallCallingState();
   const { profile } = useUser();
+
   const [lang, setLang] = useState(initialLang);
   const [translatorMuted, setTranslatorMuted] = useState(false);
   const [activeSidebar, setActiveSidebar] = useState<"participants" | "captions" | "translation" | "chat" | "breakout" | null>("translation");
@@ -46,110 +58,132 @@ export default function InCall({
     profile?.content_type || "normal"
   );
   const router = useRouter();
-  const isHost = typeof window !== 'undefined' && window.sessionStorage.getItem("orbitHostRoom") === room.name;
+  const isHost = typeof window !== "undefined" && window.sessionStorage.getItem("orbitHostRoom") === call?.id;
 
-  useDataChannel("moderate", (msg) => {
-    try {
-      const payload = JSON.parse(new TextDecoder().decode(msg.payload));
-      if (payload.type === "REQUEST_VIDEO" && payload.targetIdentity === localParticipant.identity) {
+  const { peerLangs } = useTranslationRouting(
+    lang,
+    localParticipant?.userId ?? "",
+    true,
+    true,
+    true,
+    translatorMuted,
+    speakerMuted,
+  );
+
+  // ── Listen for custom events (replaces LiveKit data channels) ──
+  // Moderation events
+  useEffect(() => {
+    if (!call) return;
+    const handler = (event: any) => {
+      if (event.custom?.type === "REQUEST_VIDEO" && event.custom?.targetUserId === localParticipant?.userId) {
         if (confirm("The host has requested you to turn on your camera. Turn it on now?")) {
-          localParticipant.setCameraEnabled(true);
+          call.camera.enable().catch(() => {});
         }
       }
-    } catch {}
-  });
+    };
+    call.on("custom", handler);
+    return () => call.off("custom", handler);
+  }, [call, localParticipant]);
 
+  // Reactions
   const [reactions, setReactions] = useState<Map<string, { emoji: string; ts: number }>>(new Map());
 
-  useDataChannel("react", (msg) => {
-    try {
-      const payload = JSON.parse(new TextDecoder().decode(msg.payload));
-      if (payload.emoji && payload.fromId) {
+  useEffect(() => {
+    if (!call) return;
+    const handler = (event: any) => {
+      const data = event.custom;
+      if (data?.type === "react" && data?.emoji && data?.fromId) {
         setReactions((prev) => {
           const next = new Map(prev);
-          next.set(payload.fromId, { emoji: payload.emoji, ts: Date.now() });
+          next.set(data.fromId, { emoji: data.emoji, ts: Date.now() });
           return next;
         });
-        // Auto-clear after 4 seconds
         setTimeout(() => {
           setReactions((prev) => {
             const next = new Map(prev);
-            next.delete(payload.fromId);
+            next.delete(data.fromId);
             return next;
           });
         }, 4000);
       }
-    } catch {}
-  });
+    };
+    call.on("custom", handler);
+    return () => call.off("custom", handler);
+  }, [call]);
 
-  useDataChannel("breakout", (msg) => {
-    try {
-      const payload = JSON.parse(new TextDecoder().decode(msg.payload));
-      if (payload.type === "BREAKOUT_JOIN" && payload.newRoom) {
-        // Preserve identity for the new room
-        const name = sessionStorage.getItem("lt.displayName") || localParticipant.name || "participant";
-        const lang = sessionStorage.getItem("lt.lang") || initialLang;
-        sessionStorage.setItem("lt.displayName", name);
-        sessionStorage.setItem("lt.lang", lang);
-        if (payload.token) {
-          // Store pre-generated token for the breakout room
-          sessionStorage.setItem("orbit.breakout-token", payload.token);
-          sessionStorage.setItem("orbit.breakout-server-url", payload.serverUrl || "");
-          // Store the breakout identity so RoomClient uses it instead of generating a new one
-          if (payload.breakoutIdentity) {
-            sessionStorage.setItem("orbit.breakout-identity", payload.breakoutIdentity);
+  // Breakout events
+  useEffect(() => {
+    if (!call) return;
+    const handler = (event: any) => {
+      try {
+        const payload = event.custom;
+        if (!payload) return;
+        if (payload.type === "BREAKOUT_JOIN" && payload.newRoom) {
+          const name = sessionStorage.getItem("lt.displayName") || localParticipant?.name || "participant";
+          const savedLang = sessionStorage.getItem("lt.lang") || initialLang;
+          sessionStorage.setItem("lt.displayName", name);
+          sessionStorage.setItem("lt.lang", savedLang);
+          if (payload.token) {
+            sessionStorage.setItem("orbit.breakout-token", payload.token);
+            sessionStorage.setItem("orbit.breakout-server-url", payload.serverUrl || "");
+            if (payload.breakoutIdentity) {
+              sessionStorage.setItem("orbit.breakout-identity", payload.breakoutIdentity);
+            }
           }
+          alert("You have been assigned to a breakout room. Moving now...");
+          router.push(`/session/${payload.newRoom}/room?returnTo=${payload.originalRoom}`);
+        } else if (payload.type === "BREAKOUT_END" && payload.originalRoom) {
+          const name = sessionStorage.getItem("lt.displayName") || localParticipant?.name || "participant";
+          const savedLang = sessionStorage.getItem("lt.lang") || initialLang;
+          sessionStorage.setItem("lt.displayName", name);
+          sessionStorage.setItem("lt.lang", savedLang);
+          alert("Breakout session ended. Returning to main room...");
+          router.push(`/session/${payload.originalRoom}/room`);
         }
-        alert("You have been assigned to a breakout room. Moving now...");
-        router.push(`/session/${payload.newRoom}/room?returnTo=${payload.originalRoom}`);
-      } else if (payload.type === "BREAKOUT_END" && payload.originalRoom) {
-        const name = sessionStorage.getItem("lt.displayName") || localParticipant.name || "participant";
-        const lang = sessionStorage.getItem("lt.lang") || initialLang;
-        sessionStorage.setItem("lt.displayName", name);
-        sessionStorage.setItem("lt.lang", lang);
-        alert("Breakout session ended. Returning to main room...");
-        router.push(`/session/${payload.originalRoom}/room`);
+      } catch {
+        // Ignore non-JSON or unrelated messages
       }
-    } catch {
-      // Ignore non-JSON or unrelated messages
-    }
-  });
+    };
+    call.on("custom", handler);
+    return () => call.off("custom", handler);
+  }, [call, localParticipant, initialLang, router]);
 
   const toggleSidebar = (sidebar: "participants" | "captions" | "translation" | "chat" | "breakout") => {
     setActiveSidebar((current) => (current === sidebar ? null : sidebar));
   };
 
-  // Push the local lang into participant attributes so the agent + peers see
-  // it. setAttributes is silently dropped before the room is connected, so we
-  // both fire on `lang` change and re-fire when the connection becomes ready.
-  // Host status is also broadcast so all participants can identify the host.
+  // ── Push local lang into participant custom data ──
+  // Stream: use call.updateCallMembers() to broadcast custom data to all participants.
+  // This replaces LiveKit's setAttributes().
   useEffect(() => {
-    if (!localParticipant || !room) return;
-    const apply = () => {
-      console.log("[Orbit] Attempting to set attributes. Room state:", room.state, "Lang:", lang);
-      if (room.state === ConnectionState.Connected) {
-        // Serialize glossary as JSON string for the agent to read
+    if (!call || !localParticipant) return;
+
+    const apply = async () => {
+      // Stream CallingState is an enum; "joined" is the string value
+      if (callingState !== "joined" as any) return;
+      try {
         const glossaryStr = profile?.glossary?.length
           ? JSON.stringify(profile.glossary)
           : "";
-        console.log("[Orbit] Room connected. Setting attributes for", localParticipant.identity);
-        localParticipant.setAttributes({
-          [PARTICIPANT_LANG_ATTR]: lang,
-          orbit_hand: handRaised ? "raised" : "",
-          orbit_host: isHost ? "true" : "",
-          orbit_glossary: glossaryStr,
-          orbit_content_type: contentType,
+        await call.updateCallMembers({
+          update_members: [{
+            user_id: localParticipant.userId,
+            custom: {
+              lang: lang,
+              orbit_hand: handRaised ? "raised" : "",
+              orbit_host: isHost ? "true" : "",
+              orbit_glossary: glossaryStr,
+              orbit_content_type: contentType,
+            },
+          }],
         });
-      } else {
-        console.log("[Orbit] Room not connected. Skipping setAttributes.");
+      } catch (err) {
+        console.warn("[InCall] Failed to update custom attributes:", err);
       }
     };
+
     apply();
-    room.on(RoomEvent.Connected, apply);
-    return () => {
-      room.off(RoomEvent.Connected, apply);
-    };
-  }, [room, localParticipant, lang, handRaised, isHost, profile?.glossary, contentType]);
+  }, [call, localParticipant, lang, handRaised, isHost, profile?.glossary, contentType, callingState]);
 
   // Sync local contentType state from the user profile when it loads/changes
   useEffect(() => {
@@ -158,32 +192,19 @@ export default function InCall({
     }
   }, [profile?.content_type]);
 
-  useTranslationRouting(lang, localParticipant.identity, true, true, true, translatorMuted, speakerMuted);
-
-
-
-
+  // ── Derived data ──
+  // Filter out agent participants (identified by custom.is_agent flag)
   const humanRemotes = useMemo(
-    () => remotes.filter((p) => p.kind !== ParticipantKind.AGENT),
+    () => remotes.filter((p) => !(p.custom as ParticipantCustomData)?.is_agent),
     [remotes],
   );
-  const peerLangs = useMemo(() => {
-    const map = new Map<string, string | undefined>();
-    for (const p of humanRemotes) {
-      map.set(p.identity, p.attributes?.[PARTICIPANT_LANG_ATTR]);
-    }
-    return map;
-  }, [humanRemotes]);
 
   const langInfo = getLanguageByCode(lang);
 
-  const screenShareTracks = useTracks([Track.Source.ScreenShare]);
-  const hasScreenShare = screenShareTracks.length > 0;
-
-
   const shareUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/session/${room.name}`
+    ? `${window.location.origin}/session/${call?.id ?? ""}`
     : "";
+
   const shellClassName = `room-shell${
     activeSidebar ? ` room-shell--sidebar-open room-shell--${activeSidebar}-open` : ""
   }`;
@@ -219,9 +240,7 @@ export default function InCall({
                 onClick={() => {
                   const cycle: Array<"normal" | "movie" | "cinematic_faithful"> = ["normal", "movie", "cinematic_faithful"];
                   const idx = cycle.indexOf(contentType);
-                  const next = cycle[(idx + 1) % cycle.length];
-                  setContentType(next);
-                  localParticipant?.setAttributes({ orbit_content_type: next });
+                  setContentType(cycle[(idx + 1) % cycle.length]);
                 }}
               >
                 <FilmIcon />
@@ -238,7 +257,7 @@ export default function InCall({
             </div>
             
             <div className="orbit-topbar-right">
-              <span className="orbit-room-id">{room.name}</span>
+              <span className="orbit-room-id">{call?.id ?? ""}</span>
               <button
                 className="orbit-copy-btn"
                 onClick={copyShareLink}
@@ -269,7 +288,7 @@ export default function InCall({
               <span>Orbit</span>
               <ChevronDownIcon />
             </button>
-            <button className="orbit-mobile-leave" onClick={async () => { await room.disconnect(); onLeave(); }}>
+            <button className="orbit-mobile-leave" onClick={async () => { await call?.leave(); onLeave(); }}>
               Leave
             </button>
           </div>
@@ -279,11 +298,9 @@ export default function InCall({
         <main className="room-stage orbit-stage">
           <div className="orbit-stage-center">
             {hasScreenShare ? (
-              <ScreenShareView
-                myLang={lang}
-              />
+              <ScreenShareView myLang={lang} />
             ) : (
-              <GalleryView remotes={humanRemotes} myLang={lang} isHost={isHost} roomName={room.name} />
+              <GalleryView remotes={humanRemotes} myLang={lang} isHost={isHost} roomName={call?.id ?? ""} />
             )}
           </div>
           {/* Right Sidebar Panel */}
@@ -293,7 +310,7 @@ export default function InCall({
               participants={humanRemotes} 
               myLang={lang} 
               isHost={isHost}
-              roomName={room.name}
+              roomName={call?.id ?? ""}
               onClose={() => setActiveSidebar(null)}
               onToggleChat={() => toggleSidebar("chat")}
               reactions={reactions}
@@ -315,7 +332,7 @@ export default function InCall({
               translatorMuted={translatorMuted}
               onToggleTranslator={() => setTranslatorMuted((v) => !v)}
               peerLangs={peerLangs}
-              roomName={room.name}
+              roomName={call?.id ?? ""}
             />
           )}
           {activeSidebar === "chat" && (
@@ -335,13 +352,11 @@ export default function InCall({
           onToggleSpeaker={() => setSpeakerMuted((v) => !v)}
           handRaised={handRaised}
           onToggleHand={() => {
-            const cur = localParticipant?.attributes?.orbit_hand === "raised";
+            const cur = (localParticipant?.custom as ParticipantCustomData)?.orbit_hand === "raised";
             setHandRaised(!cur);
-            localParticipant?.setAttributes({ orbit_hand: cur ? "" : "raised" });
           }}
         />
       </div>
-
     </div>
   );
 }
