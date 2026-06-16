@@ -6,6 +6,7 @@
  */
 const { app, BrowserWindow, dialog, ipcMain, shell, desktopCapturer } = require("electron");
 const path = require("path");
+const fs = require("fs");
 const { fork } = require("child_process");
 
 const isDev = !app.isPackaged;
@@ -14,8 +15,29 @@ const isDev = !app.isPackaged;
 const DEV_SERVER_PORT = process.env.ELECTRON_DEV_PORT || 3000;
 const PORT = isDev ? DEV_SERVER_PORT : (process.env.ELECTRON_PORT || 3456);
 
-// ── Ollama check (first launch) ──────────────────────────────────────
+// ── Ollama check (first launch only) ──────────────────────────────────
 const OLLAMA_CHECKED_KEY = "orbit.ollama-checked";
+let _ollamaChecked = false;
+
+function ollamaChecked() {
+  if (_ollamaChecked) return true;
+  try {
+    const flagPath = path.join(app.getPath("userData"), ".orbit-ollama-checked");
+    if (fs.existsSync(flagPath)) {
+      _ollamaChecked = true;
+      return true;
+    }
+  } catch { /* reading userData failed — check anyway */ }
+  return false;
+}
+
+function markOllamaChecked() {
+  try {
+    const flagPath = path.join(app.getPath("userData"), ".orbit-ollama-checked");
+    fs.writeFileSync(flagPath, Date.now().toString());
+    _ollamaChecked = true;
+  } catch { /* non-fatal */ }
+}
 
 function detectOllama() {
   try {
@@ -86,15 +108,16 @@ function showOllamaRecovery(win) {
       "• Windows: Download from https://ollama.com/download\n" +
       "• Linux: curl -fsSL https://ollama.com/install.sh | sh\n\n" +
       "After installing, restart Orbit Meeting.",
-    buttons: ["Install Automatically", "Visit Ollama Website", "Skip"],
-    defaultId: 0,
-    cancelId: 2,
-  }).then(({ response }) => {
-    if (response === 0) {
-      try {
-        const success = installOllama();
-        if (success) {
-          dialog.showMessageBox(win, {
+      buttons: ["Install Automatically", "Visit Ollama Website", "Skip"],
+      defaultId: 0,
+      cancelId: 2,
+    }).then(({ response }) => {
+      if (response === 0) {
+        try {
+          const success = installOllama();
+          if (success) {
+            markOllamaChecked();
+            dialog.showMessageBox(win, {
             type: "info",
             title: "Ollama Installed",
             message: "Ollama has been installed successfully!",
@@ -114,7 +137,11 @@ function showOllamaRecovery(win) {
         });
       }
     } else if (response === 1) {
+      markOllamaChecked();
       shell.openExternal("https://ollama.com");
+    } else {
+      // Skip — don't ask again
+      markOllamaChecked();
     }
   });
 }
@@ -244,8 +271,8 @@ ipcMain.handle("app:isPackaged", () => app.isPackaged);
 // ── App lifecycle ────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
-  // First-launch Ollama check
-  if (!isDev && !detectOllama()) {
+  // First-launch Ollama check (runs once, persisted to disk)
+  if (!isDev && !ollamaChecked() && !detectOllama()) {
     // We'll show the dialog after the window is ready, but store the intent
     globalThis._pendingOllamaCheck = true;
   }
